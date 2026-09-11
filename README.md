@@ -1,41 +1,68 @@
-# TransWave Operations MVP
+# TransWave Operations
 
-An initial Next.js interface and PostgreSQL schema for a logistics job-and-invoice system.
+TransWave is a logistics job and invoicing application. The repository is organized as a typed npm-workspace monorepo:
 
-## Run locally
+- `apps/web` — Next.js interface
+- `apps/api` — NestJS/Fastify API
+- `packages/contracts` — shared Zod request and response contracts
+- `packages/database` — typed Supabase clients and generated database types
+- `supabase` — local infrastructure, migrations, row-level security and seed data
+
+## Local setup
+
+Requirements: Node.js 24, npm 11, Docker Desktop and the Supabase CLI dependency installed by `npm install`.
 
 ```bash
 npm install
+npm run db:start
+cp apps/api/.env.example apps/api/.env
+```
+
+Copy the local publishable key printed by `npm run db:status` into `apps/api/.env`, then run:
+
+```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+- Web: `http://localhost:3000`
+- API: `http://localhost:3001/api/v1`
+- Swagger: `http://localhost:3001/api/docs`
+- Supabase Studio: `http://localhost:54323`
 
-## What is present
+The local seed includes `finance@transwave.local` with password `Transwave123!`. It is development data only.
 
-- Dashboard: operational and financial headline metrics, jobs requiring attention, and activity timeline.
-- Customer master: customer profiles, TRN, default currency, payment terms, and a create-customer flow.
-- Job workspace: POL/POD port master, transport mode, shipment references, containers, and job-charge workflow.
-- Invoice workspace: create a draft from selected unbilled job charges; inspect customer, route, shipment, equipment and container snapshots with quantity-aware, rounded line VAT and totals. Draft allocations prevent the same charge being selected twice.
-- Payments, reports, and master-data views to validate the full operational workflow.
-- PostgreSQL foundation for customers, branches, jobs, shipments, documents, containers, charges, invoices, line-level VAT, and multi-currency values.
+## Implemented persistence flow
 
-All interactions use demonstration data only. Jobs, charges and new draft invoices are held in browser memory; refreshing resets them. Dashboard, Payments and Reports still show independent demo figures, not live draft totals. Customer creation and payment capture remain interface placeholders.
+The API currently supports authenticated job listing/detail, invoice listing/detail, draft creation and issuance:
 
-## Job to invoice testing
+- `GET /api/v1/jobs`
+- `GET /api/v1/jobs/:id`
+- `GET /api/v1/invoices`
+- `GET /api/v1/invoices/:id`
+- `POST /api/v1/invoices/drafts`
+- `POST /api/v1/invoices/:id/issue`
 
-1. Open Jobs and choose a job. The first sample job has two initial charges; other jobs start without charges.
-2. Use a service’s Add charge action to enter its agreed quantity, unit, AED rate and VAT. Once added, Edit charge updates that same row; each service has one charge per job. Charges already in a draft are locked and offer View draft. Pricing is entered per job, not reused from rate cards.
-3. Choose Create invoice, select any unbilled charges, then Create draft. The app opens the saved draft in Invoices.
-4. Return to Jobs: selected charges link to their draft. Remaining unbilled charges can be used in another draft. Creating a draft does not mark the job Invoiced.
-5. Edit job details and reopen an existing draft: its copied details remain unchanged. Charges remain visible even if their service is later removed from the job.
+Supabase row-level security isolates companies. Containers are job-level records and are copied into the invoice snapshot; charges never link to containers. A database constraint allows each service only once per job and one current charge per job service. Draft creation atomically allocates selected charges so they cannot be invoiced twice. Issuance locks the invoice, assigns a branch/year sequence number, and preserves its customer, route, shipment, container and monetary snapshots.
 
-6. Open a draft and choose Issue invoice. Review its customer and total, then confirm. The invoice becomes ISSUED with an issued date and remains locked. Cancel leaves it DRAFT. Issuance does not change the job status or send anything externally.
+The existing web interface still uses its in-memory adapter. Replacing that adapter with these authenticated API endpoints is the next implementation slice.
 
-7. Issued invoices offer Print / Save PDF. This opens the browser’s print dialog with a dedicated A4 invoice layout; choose a printer or Save as PDF. Drafts do not have this final print action. The suggested filename uses the invoice ID. No server-generated PDF, email or bank details are added.
+## Verification
 
-The invoice screen replaces the old static invoice list. Approval and invoice editing/deletion are not implemented in this flow. Both draft and issued invoices are held in memory; refresh is the prototype reset mechanism.
+```bash
+npm run test:unit
+npm run typecheck
+npm run lint
+npm run build
+```
 
-## Deliberately next
+With the API running on port 3001, this resets the local database and verifies tenant isolation plus the full job → draft → issued-invoice flow:
 
-Persist the UI through a NestJS API and PostgreSQL, add authentication/roles and audit logs, then implement real approval, PDF/email, and payment integrations.
+```bash
+npm run test:smoke
+```
+
+Regenerate database types after changing migrations:
+
+```bash
+npm run db:types
+```

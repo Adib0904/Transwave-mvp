@@ -1,0 +1,24 @@
+{
+  "name": "@transwave/web",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node invoice-model.test.cjs && node print-invoice.test.cjs"
+  },
+  "dependencies": {
+    "@transwave/contracts": "0.1.0",
+    "next": "16.3.4",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.30",
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25",
+    "typescript": "6.0.3"
+  }
+}
