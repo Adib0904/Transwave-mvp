@@ -1,0 +1,18 @@
+.overlay{overflow-y:auto;overscroll-behavior:contain}
+.overlay > .modal{
+  min-height:0;
+  max-height:calc(100vh - 40px);
+  max-height:calc(100dvh - 40px);
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+body:has(.overlay){overflow:hidden}
+.job-editor{width:min(760px,100%)}
+.job-editor fieldset{border:1px solid var(--line);border-radius:8px}
+.service-check{display:flex;align-items:center;gap:8px;margin:8px}
+.service-check input{width:auto;margin:0}
+.job-editor .service-picker{display:flex;flex-wrap:wrap}
+.container-edit-row{display:grid;grid-template-columns:2fr 1fr auto;gap:12px;align-items:center}
+.edit-error{color:#b42318}
+@media(max-width:600px){.container-edit-row{grid-template-columns:1fr}.job-editor{padding:18px}}
