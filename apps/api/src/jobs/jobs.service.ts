@@ -17,12 +17,12 @@ export class JobsService {
     const jobIds = jobs.map(job => job.id);
     const [{ data: customers, error: customersError }, { data: shipments, error: shipmentsError }] = await Promise.all([
       database.from("customers").select("id, company_name").in("id", customerIds),
-      database.from("shipments").select("job_id, port_of_loading_id, port_of_discharge_id").in("job_id", jobIds)
+      database.from("shipments").select("job_id, port_of_loading_id, port_of_discharge_id, transshipment_port_id").in("job_id", jobIds)
     ]);
     if (customersError) throwDatabaseError(customersError);
     if (shipmentsError) throwDatabaseError(shipmentsError);
 
-    const portIds = [...new Set((shipments ?? []).flatMap(shipment => [shipment.port_of_loading_id, shipment.port_of_discharge_id]))];
+    const portIds = [...new Set((shipments ?? []).flatMap(shipment => [shipment.port_of_loading_id, shipment.port_of_discharge_id, shipment.transshipment_port_id]).filter((id): id is string => Boolean(id)))];
     const portsResult = portIds.length
       ? await database.from("ports").select("id, name").in("id", portIds)
       : { data: [], error: null };
@@ -57,7 +57,7 @@ export class JobsService {
     const taxIds = [...new Set(charges.map(charge => charge.tax_rate_id))];
     const chargeIds = charges.map(charge => charge.id);
     const [portsResult, servicesResult, taxesResult, invoiceLinesResult] = await Promise.all([
-      database.from("ports").select("id, name").in("id", [shipment.port_of_loading_id, shipment.port_of_discharge_id]),
+      database.from("ports").select("id, name").in("id", [shipment.port_of_loading_id, shipment.port_of_discharge_id, shipment.transshipment_port_id].filter((portId): portId is string => Boolean(portId))),
       serviceIds.length ? database.from("services").select("*").in("id", serviceIds) : Promise.resolve({ data: [], error: null }),
       taxIds.length ? database.from("tax_rates").select("id, rate").in("id", taxIds) : Promise.resolve({ data: [], error: null }),
       chargeIds.length ? database.from("invoice_lines").select("job_charge_id, invoice_id").in("job_charge_id", chargeIds) : Promise.resolve({ data: [], error: null })
@@ -106,6 +106,7 @@ export class JobsService {
       customerId: customer.id,
       polId: shipment.port_of_loading_id,
       podId: shipment.port_of_discharge_id,
+      transshipmentPortId: shipment.transshipment_port_id,
       vessel: shipment.vessel,
       voyage: shipment.voyage,
       hbl: shipment.hbl,
@@ -128,7 +129,7 @@ export class JobsService {
   private toSummary(
     job: JobRow,
     customersById: Map<string, string>,
-    shipmentsByJob: Map<string, { port_of_loading_id: string; port_of_discharge_id: string }>,
+    shipmentsByJob: Map<string, { port_of_loading_id: string; port_of_discharge_id: string; transshipment_port_id: string | null }>,
     portsById: Map<string, string>
   ): JobSummary {
     const shipment = shipmentsByJob.get(job.id);
@@ -138,6 +139,7 @@ export class JobsService {
       customerName: customersById.get(job.customer_id) ?? "Unknown customer",
       polName: shipment ? portsById.get(shipment.port_of_loading_id) ?? "Unknown port" : "Not set",
       podName: shipment ? portsById.get(shipment.port_of_discharge_id) ?? "Unknown port" : "Not set",
+      transshipmentPortName: shipment?.transshipment_port_id ? portsById.get(shipment.transshipment_port_id) ?? "Unknown port" : null,
       transportMode: job.transport_mode,
       status: job.status,
       plannedContainerType: job.planned_container_type,

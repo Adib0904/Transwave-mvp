@@ -63,6 +63,7 @@ export class InvoicesService {
       jobNumber: invoice.job_number_snapshot,
       polName: invoice.pol_snapshot,
       podName: invoice.pod_snapshot,
+      transshipmentPortName: invoice.transshipment_port_snapshot,
       transportMode: invoice.transport_mode_snapshot,
       vessel: invoice.vessel_snapshot,
       voyage: invoice.voyage_snapshot,

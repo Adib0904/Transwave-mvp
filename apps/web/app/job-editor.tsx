@@ -2,7 +2,7 @@
 import { useState } from "react";
 
 export type EditableJob = {
-  id: string; customer: string; mode: string; services: string[]; pol: string; pod: string;
+  id: string; customer: string; mode: string; services: string[]; pol: string; pod: string; transshipmentPort: string;
   status: "Open" | "Ready to invoice" | "Invoiced"; value: number; plannedEquipment: string;
   containers: string[]; hbl: string; vessel: string;
 };
@@ -44,7 +44,7 @@ export default function JobEditor({ job, customers, ports, onSave, onClose }: {
     <div className="panel-head"><div><h2 id="edit-job-title">Edit job</h2><p>{job.id}</p></div><button className="x" type="button" aria-label="Close job editor" onClick={onClose}>×</button></div>
     <p>Update this job’s details. Customer selection changes the billing customer for this job.</p>
     <label>Customer<select required value={draft.customer} onChange={e => setDraft({ ...draft, customer: e.target.value })}>{Array.from(new Set([draft.customer, ...customers])).map(c => <option key={c}>{c}</option>)}</select></label>
-    <div className="two">{(["pol", "pod"] as const).map(key => <label key={key}>{key.toUpperCase()}<select required value={draft[key]} onChange={e => setDraft({ ...draft, [key]: e.target.value })}>{Array.from(new Set([draft[key], ...ports])).map(p => <option key={p}>{p}</option>)}</select></label>)}</div>
+    <div className="route-fields"><label>POL<select required value={draft.pol} onChange={e => setDraft({ ...draft, pol: e.target.value })}>{Array.from(new Set([draft.pol, ...ports])).map(p => <option key={p}>{p}</option>)}</select></label><label>Transshipment port <span className="optional">Optional</span><select value={draft.transshipmentPort} onChange={e => setDraft({ ...draft, transshipmentPort: e.target.value })}><option value="">Direct shipment</option>{ports.filter(port => port !== draft.pol && port !== draft.pod).map(p => <option key={p}>{p}</option>)}</select></label><label>POD<select required value={draft.pod} onChange={e => setDraft({ ...draft, pod: e.target.value })}>{Array.from(new Set([draft.pod, ...ports])).map(p => <option key={p}>{p}</option>)}</select></label></div>
     <label>Transport mode<select value={draft.mode} onChange={e => setDraft({ ...draft, mode: e.target.value })}>{["SEA", "ROAD", "AIR", "MULTIMODAL"].map(m => <option key={m}>{m}</option>)}</select></label>
     <fieldset><legend>Services</legend><div className="service-picker">{services.map(s => <label className="service-check" key={s}><input type="checkbox" checked={draft.services.includes(s)} onChange={e => setDraft({ ...draft, services: e.target.checked ? [...draft.services, s] : draft.services.filter(v => v !== s) })}/>{s}</label>)}</div></fieldset>
     <div className="two"><label>Vessel / voyage<input value={draft.vessel} onChange={e => setDraft({ ...draft, vessel: e.target.value })}/></label><label>HBL / MBL reference<input value={draft.hbl} onChange={e => setDraft({ ...draft, hbl: e.target.value })}/></label></div>

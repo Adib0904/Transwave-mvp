@@ -1,0 +1,143 @@
+@import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;600;700;900&family=Raleway:wght@500;600;700;800&display=swap");
+
+:root {
+  --ink: #1e3a4c;
+  --muted: #647985;
+  --line: #dce6e9;
+  --blue: #178ba6;
+  --navy: #1e3a4c;
+  --bg: #f5f8f9;
+  --green: #16775d;
+}
+
+body,
+button,
+input,
+select {
+  font-family: Lato, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+h1,
+h2,
+h3,
+.logo,
+.metric strong,
+.button {
+  font-family: Raleway, Lato, sans-serif;
+}
+
+.side {
+  background: linear-gradient(180deg, #1e3a4c 0%, #142c3b 100%);
+  border-right: 3px solid #178ba6;
+}
+
+.logo {
+  font-size: 17px;
+  letter-spacing: .4px;
+  text-transform: none;
+}
+
+.logo b {
+  background: #178ba6;
+  color: #fff;
+  border-radius: 50% 50% 50% 12%;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, .09);
+}
+
+.menu.active,
+.menu:hover {
+  background: rgba(23, 139, 166, .28);
+  box-shadow: inset 3px 0 #54bdd3;
+}
+
+.kicker,
+.link-button {
+  color: #178ba6;
+}
+
+.button {
+  background: #178ba6;
+  border-radius: 24px;
+  box-shadow: 0 6px 16px rgba(23, 139, 166, .18);
+  letter-spacing: .1px;
+}
+
+.button:hover {
+  background: #126f86;
+}
+
+.soft {
+  background: #e8f4f6;
+  color: #126f86;
+  border-radius: 24px;
+}
+
+.panel,
+.metric {
+  border-color: #dce6e9;
+  box-shadow: 0 8px 28px rgba(30, 58, 76, .06);
+}
+
+.metric {
+  border-top-color: #d7e8ec;
+}
+
+.metric.good {
+  border-top-color: #178ba6;
+}
+
+.job.selected,
+.invoice.selected {
+  border-color: #178ba6;
+  box-shadow: 0 0 0 2px rgba(23, 139, 166, .16);
+}
+
+.tag.blue {
+  background: #e4f3f6;
+  color: #126f86;
+}
+
+.route-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.route-summary {
+  background: linear-gradient(135deg, #1e3a4c, #28576b);
+  color: #fff;
+  border-radius: 10px;
+  padding: 15px 17px;
+  display: grid;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+
+.route-summary small {
+  color: #8fd7e5;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.route-summary strong {
+  font-family: Raleway, sans-serif;
+  line-height: 1.45;
+}
+
+.route-summary span {
+  color: #d1ebf0;
+  font-size: 11px;
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: 3px solid rgba(23, 139, 166, .25);
+  outline-offset: 2px;
+  border-color: #178ba6;
+}
+
+@media (max-width: 700px) {
+  .route-fields { grid-template-columns: 1fr; }
+}

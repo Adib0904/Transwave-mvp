@@ -42,7 +42,7 @@ The API currently supports authenticated job listing/detail, invoice listing/det
 - `POST /api/v1/invoices/drafts`
 - `POST /api/v1/invoices/:id/issue`
 
-Supabase row-level security isolates companies. Containers are job-level records and are copied into the invoice snapshot; charges never link to containers. A database constraint allows each service only once per job and one current charge per job service. Draft creation atomically allocates selected charges so they cannot be invoiced twice. Issuance locks the invoice, assigns a branch/year sequence number, and preserves its customer, route, shipment, container and monetary snapshots.
+Supabase row-level security isolates companies. Routes support an optional transshipment port between POL and POD. Containers are job-level records and are copied into the invoice snapshot; charges never link to containers. A database constraint allows each service only once per job and one current charge per job service. Draft creation atomically allocates selected charges so they cannot be invoiced twice. Issuance locks the invoice, assigns a branch/year sequence number, and preserves its customer, route, shipment, container and monetary snapshots.
 
 The existing web interface still uses its in-memory adapter. Replacing that adapter with these authenticated API endpoints is the next implementation slice.
 

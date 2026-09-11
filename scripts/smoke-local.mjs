@@ -44,6 +44,7 @@ assert(viewerJobs.body[0].jobNumber === "SC-26001", "Viewer received another com
 const job = await request("/jobs/50000000-0000-4000-8000-000000000001", finance);
 assert(job.status === 200, "Job detail was not returned");
 assert(job.body.containers.length === 1, "Job-level containers were not returned");
+assert(job.body.transshipmentPortName === "Singapore", "Job transshipment port was not returned");
 assert(job.body.services.length === 2 && new Set(job.body.services.map(service => service.id)).size === 2, "Job services were duplicated");
 assert(job.body.charges.length === 2 && job.body.charges.every(charge => !("containerId" in charge)), "Charges contain invalid container links");
 
@@ -54,6 +55,7 @@ const draft = await request("/invoices/drafts", finance, {
 });
 assert(draft.status === 201 && draft.body.status === "DRAFT", "Draft invoice was not created");
 assert(draft.body.lines.length === 2 && draft.body.total === "3517.50", "Draft totals or lines are incorrect");
+assert(draft.body.transshipmentPortName === "Singapore", "Draft did not snapshot the transshipment port");
 
 const duplicate = await request("/invoices/drafts", finance, {
   method: "POST",

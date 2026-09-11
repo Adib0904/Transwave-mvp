@@ -508,6 +508,7 @@ export type Database = {
           status: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed: number
           total_aed: number
+          transshipment_port_snapshot: string | null
           transport_mode_snapshot: Database["public"]["Enums"]["transport_mode"]
           updated_at: string
           vat_amount_aed: number
@@ -548,6 +549,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed?: number
           total_aed?: number
+          transshipment_port_snapshot?: string | null
           transport_mode_snapshot: Database["public"]["Enums"]["transport_mode"]
           updated_at?: string
           vat_amount_aed?: number
@@ -588,6 +590,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed?: number
           total_aed?: number
+          transshipment_port_snapshot?: string | null
           transport_mode_snapshot?: Database["public"]["Enums"]["transport_mode"]
           updated_at?: string
           vat_amount_aed?: number
@@ -903,6 +906,7 @@ export type Database = {
           place_of_delivery: string | null
           port_of_discharge_id: string
           port_of_loading_id: string
+          transshipment_port_id: string | null
           sailed_at: string | null
           updated_at: string
           vessel: string | null
@@ -918,6 +922,7 @@ export type Database = {
           place_of_delivery?: string | null
           port_of_discharge_id: string
           port_of_loading_id: string
+          transshipment_port_id?: string | null
           sailed_at?: string | null
           updated_at?: string
           vessel?: string | null
@@ -933,6 +938,7 @@ export type Database = {
           place_of_delivery?: string | null
           port_of_discharge_id?: string
           port_of_loading_id?: string
+          transshipment_port_id?: string | null
           sailed_at?: string | null
           updated_at?: string
           vessel?: string | null
@@ -1177,4 +1183,3 @@ export const Constants = {
     },
   },
 } as const
-

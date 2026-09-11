@@ -23,8 +23,16 @@ const legacyUpdated = reduce(legacy, { type: 'updateCharge', jobId: 'a', charge:
 assert.equal(legacyUpdated.chargesByJob.a.length, 2);
 assert.equal(legacyUpdated.chargesByJob.a[0].rate, 100);
 assert.equal(legacyUpdated.chargesByJob.a[1].rate, 400);
-const job = { id: 'a', services: ['Land Transport'], containers: [] };
+const job = {
+  id: 'a',
+  services: ['Land Transport'],
+  containers: [],
+  pol: 'Shanghai (CNSHA)',
+  transshipmentPort: 'Singapore (SGSIN)',
+  pod: 'Jebel Ali (AEJEA)',
+};
 const drafted = reduce(initial, { type: 'createDraft', job, chargeIds: ['one'], customerTrn: '', paymentTerms: '', createdAt: '2026-09-11' });
+assert.equal(drafted.invoices[0].job.transshipmentPort, 'Singapore (SGSIN)');
 assert.equal(reduce(drafted, { type: 'updateCharge', jobId: 'a', charge: { ...line, rate: 500 } }), drafted);
 assert.equal(drafted.invoices[0].lines[0].rate, 100);
 assert.equal(reduce(drafted, { type: 'addCharge', jobId: 'a', charge: { ...line, id: 'three' } }), drafted);
