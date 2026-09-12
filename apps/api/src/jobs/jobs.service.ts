@@ -1,13 +1,61 @@
 import { Injectable } from "@nestjs/common";
-import type { Charge, JobDetail, JobSummary } from "@transwave/contracts";
+import type { Charge, CreateCharge, JobDetail, JobSummary, SaveContainer, SaveJob } from "@transwave/contracts";
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
+import { resolveTenant } from "../common/tenant.js";
 
 type JobRow = Database["public"]["Tables"]["jobs"]["Row"];
+type CreateJobArgs = Database["public"]["Functions"]["create_job"]["Args"];
 
 @Injectable()
 export class JobsService {
+  async create(database: TransWaveDatabaseClient, userId: string, input: SaveJob): Promise<JobDetail> {
+    const tenant = await resolveTenant(database, userId);
+    const { data, error } = await database.rpc("create_job", { ...this.rpcInput(input), p_company_id: tenant.companyId });
+    if (error) throwDatabaseError(error);
+    return this.findOne(database, requireData(data, null, "Job was not created"));
+  }
+
+  async update(database: TransWaveDatabaseClient, id: string, input: SaveJob): Promise<JobDetail> {
+    const { data, error } = await database.rpc("update_job", { ...this.rpcInput(input), p_job_id: id });
+    if (error) throwDatabaseError(error);
+    return this.findOne(database, requireData(data, null, "Job was not updated"));
+  }
+
+  async addContainer(database: TransWaveDatabaseClient, jobId: string, input: SaveContainer): Promise<JobDetail> {
+    const jobResult = await database.from("jobs").select("company_id").eq("id", jobId).maybeSingle();
+    const job = requireData(jobResult.data, jobResult.error, "Job not found");
+    const { error } = await database.from("containers").insert({ company_id: job.company_id, job_id: jobId, container_number: input.containerNumber, size: Number(input.size), container_type: input.containerType, seal_number: input.sealNumber });
+    if (error) throwDatabaseError(error);
+    return this.findOne(database, jobId);
+  }
+
+  async removeContainer(database: TransWaveDatabaseClient, jobId: string, containerId: string): Promise<JobDetail> {
+    const { error } = await database.from("containers").delete().eq("id", containerId).eq("job_id", jobId);
+    if (error) throwDatabaseError(error);
+    return this.findOne(database, jobId);
+  }
+
+  async saveCharge(database: TransWaveDatabaseClient, jobId: string, input: CreateCharge): Promise<JobDetail> {
+    const serviceResult = await database.from("job_services").select("company_id").eq("id", input.jobServiceId).eq("job_id", jobId).maybeSingle();
+    const jobService = requireData(serviceResult.data, serviceResult.error, "Job service not found");
+    const existing = await database.from("job_charges").select("id").eq("job_service_id", input.jobServiceId).maybeSingle();
+    if (existing.error) throwDatabaseError(existing.error);
+    const values = { company_id: jobService.company_id, job_id: jobId, job_service_id: input.jobServiceId, description: input.description, quantity: Number(input.quantity), uom: input.uom, currency_code: input.currency, exchange_rate: Number(input.exchangeRate), unit_rate: Number(input.unitRate), tax_rate_id: input.taxRateId };
+    const result = existing.data
+      ? await database.from("job_charges").update(values).eq("id", existing.data.id)
+      : await database.from("job_charges").insert(values);
+    if (result.error) throwDatabaseError(result.error);
+    return this.findOne(database, jobId);
+  }
+
+  async removeCharge(database: TransWaveDatabaseClient, jobId: string, chargeId: string): Promise<JobDetail> {
+    const { error } = await database.from("job_charges").delete().eq("id", chargeId).eq("job_id", jobId);
+    if (error) throwDatabaseError(error);
+    return this.findOne(database, jobId);
+  }
+
   async list(database: TransWaveDatabaseClient): Promise<JobSummary[]> {
     const { data: jobs, error } = await database.from("jobs").select("*").order("opened_at", { ascending: false });
     if (error) throwDatabaseError(error);
@@ -113,7 +161,7 @@ export class JobsService {
       mbl: shipment.mbl,
       services: jobServices.flatMap(item => {
         const service = servicesById.get(item.service_id);
-        return service ? [{ id: service.id, code: service.code, name: service.name, defaultUom: service.default_uom, active: service.active }] : [];
+        return service ? [{ id: service.id, jobServiceId: item.id, code: service.code, name: service.name, defaultUom: service.default_uom, active: service.active }] : [];
       }),
       containers: (containersResult.data ?? []).map(container => ({
         id: container.id,
@@ -145,5 +193,9 @@ export class JobsService {
       plannedContainerType: job.planned_container_type,
       plannedContainerCount: job.planned_container_count
     };
+  }
+
+  private rpcInput(input: SaveJob): Omit<CreateJobArgs, "p_company_id"> {
+    return { p_branch_id: input.branchId, p_customer_id: input.customerId, p_job_number: input.jobNumber, p_status: input.status, p_transport_mode: input.transportMode, p_planned_container_type: input.plannedContainerType, p_planned_container_count: input.plannedContainerCount, p_pol_id: input.polId, p_pod_id: input.podId, p_transshipment_port_id: input.transshipmentPortId, p_vessel: input.vessel, p_voyage: input.voyage, p_hbl: input.hbl, p_mbl: input.mbl, p_service_ids: input.serviceIds };
   }
 }

@@ -5,7 +5,8 @@ const environmentSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   WEB_ORIGIN: z.url().default("http://localhost:3000"),
   SUPABASE_URL: z.url(),
-  SUPABASE_PUBLISHABLE_KEY: z.string().min(1)
+  SUPABASE_PUBLISHABLE_KEY: z.string().min(1),
+  SUPABASE_SECRET_KEY: z.string().min(1)
 });
 
 export type Environment = z.infer<typeof environmentSchema>;

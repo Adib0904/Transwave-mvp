@@ -31,7 +31,7 @@ insert into public.companies (id, legal_name, trade_name, trn, address) values
   ('20000000-0000-4000-8000-000000000002', 'Second Company LLC', 'SecondCo', '100000000000004', 'Abu Dhabi, United Arab Emirates');
 
 insert into public.company_members (company_id, user_id, role) values
-  ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'FINANCE'),
+  ('20000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', 'ADMIN'),
   ('20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'VIEWER');
 
 insert into public.branches (id, company_id, code, name, emirate, address, trn) values

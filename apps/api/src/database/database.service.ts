@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { createUserDatabaseClient, type TransWaveDatabaseClient } from "@transwave/database";
+import { createSystemDatabaseClient, createUserDatabaseClient, type TransWaveDatabaseClient } from "@transwave/database";
 import type { Environment } from "../config/environment.js";
 
 @Injectable()
@@ -12,6 +12,13 @@ export class DatabaseService {
       this.config.get("SUPABASE_URL", { infer: true }),
       this.config.get("SUPABASE_PUBLISHABLE_KEY", { infer: true }),
       accessToken
+    );
+  }
+
+  system(): TransWaveDatabaseClient {
+    return createSystemDatabaseClient(
+      this.config.get("SUPABASE_URL", { infer: true }),
+      this.config.get("SUPABASE_SECRET_KEY", { infer: true })
     );
   }
 }

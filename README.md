@@ -33,7 +33,7 @@ The local seed includes `finance@transwave.local` with password `Transwave123!`.
 
 ## Implemented persistence flow
 
-The API currently supports authenticated job listing/detail, invoice listing/detail, draft creation and issuance:
+The API supports authenticated users, company-scoped master data, jobs, charges, containers and invoice issuance. The portal includes a Users screen for owners and administrators to create accounts with temporary passwords, assign roles and activate or deactivate access.
 
 - `GET /api/v1/jobs`
 - `GET /api/v1/jobs/:id`
@@ -41,10 +41,13 @@ The API currently supports authenticated job listing/detail, invoice listing/det
 - `GET /api/v1/invoices/:id`
 - `POST /api/v1/invoices/drafts`
 - `POST /api/v1/invoices/:id/issue`
+- `GET|POST|PATCH /api/v1/users`
+- `GET /api/v1/masters`
+- `POST|PATCH /api/v1/masters/{customers|ports|services}`
 
 Supabase row-level security isolates companies. Routes support an optional transshipment port between POL and POD. Containers are job-level records and are copied into the invoice snapshot; charges never link to containers. A database constraint allows each service only once per job and one current charge per job service. Draft creation atomically allocates selected charges so they cannot be invoiced twice. Issuance locks the invoice, assigns a branch/year sequence number, and preserves its customer, route, shipment, container and monetary snapshots.
 
-The existing web interface still uses its in-memory adapter. Replacing that adapter with these authenticated API endpoints is the next implementation slice.
+The web interface signs in through Supabase Auth and sends the access token to the API. The API resolves company membership and Supabase row-level security isolates tenant records. The Supabase secret key is used only by the server for account administration and must never be exposed as a `NEXT_PUBLIC_` value.
 
 ## Verification
 

@@ -20,7 +20,7 @@ export class SupabaseAuthGuard implements CanActivate {
     if (error || !userId) throw new UnauthorizedException("The access token is invalid or expired");
 
     const authenticated = request as AuthenticatedRequest;
-    authenticated.auth = { accessToken, userId };
+    authenticated.auth = { accessToken, userId, email: typeof data.claims.email === "string" ? data.claims.email : "unknown@transwave.local" };
     authenticated.database = database;
     return true;
   }

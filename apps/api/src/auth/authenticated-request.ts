@@ -5,6 +5,7 @@ export interface AuthenticatedRequest extends FastifyRequest {
   auth: {
     accessToken: string;
     userId: string;
+    email: string;
   };
   database: TransWaveDatabaseClient;
 }

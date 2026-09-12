@@ -508,8 +508,8 @@ export type Database = {
           status: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed: number
           total_aed: number
-          transshipment_port_snapshot: string | null
           transport_mode_snapshot: Database["public"]["Enums"]["transport_mode"]
+          transshipment_port_snapshot: string | null
           updated_at: string
           vat_amount_aed: number
           vessel_snapshot: string | null
@@ -549,8 +549,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed?: number
           total_aed?: number
-          transshipment_port_snapshot?: string | null
           transport_mode_snapshot: Database["public"]["Enums"]["transport_mode"]
+          transshipment_port_snapshot?: string | null
           updated_at?: string
           vat_amount_aed?: number
           vessel_snapshot?: string | null
@@ -590,8 +590,8 @@ export type Database = {
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed?: number
           total_aed?: number
-          transshipment_port_snapshot?: string | null
           transport_mode_snapshot?: Database["public"]["Enums"]["transport_mode"]
+          transshipment_port_snapshot?: string | null
           updated_at?: string
           vat_amount_aed?: number
           vessel_snapshot?: string | null
@@ -810,6 +810,7 @@ export type Database = {
       ports: {
         Row: {
           active: boolean
+          company_id: string | null
           country_code: string
           emirate: string | null
           id: string
@@ -818,6 +819,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          company_id?: string | null
           country_code: string
           emirate?: string | null
           id?: string
@@ -826,13 +828,22 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          company_id?: string | null
           country_code?: string
           emirate?: string | null
           id?: string
           name?: string
           un_locode?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ports_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       services: {
         Row: {
@@ -906,8 +917,8 @@ export type Database = {
           place_of_delivery: string | null
           port_of_discharge_id: string
           port_of_loading_id: string
-          transshipment_port_id: string | null
           sailed_at: string | null
+          transshipment_port_id: string | null
           updated_at: string
           vessel: string | null
           voyage: string | null
@@ -922,8 +933,8 @@ export type Database = {
           place_of_delivery?: string | null
           port_of_discharge_id: string
           port_of_loading_id: string
-          transshipment_port_id?: string | null
           sailed_at?: string | null
+          transshipment_port_id?: string | null
           updated_at?: string
           vessel?: string | null
           voyage?: string | null
@@ -938,8 +949,8 @@ export type Database = {
           place_of_delivery?: string | null
           port_of_discharge_id?: string
           port_of_loading_id?: string
-          transshipment_port_id?: string | null
           sailed_at?: string | null
+          transshipment_port_id?: string | null
           updated_at?: string
           vessel?: string | null
           voyage?: string | null
@@ -962,6 +973,13 @@ export type Database = {
           {
             foreignKeyName: "shipments_port_of_loading_id_fkey"
             columns: ["port_of_loading_id"]
+            isOneToOne: false
+            referencedRelation: "ports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipments_transshipment_port_id_fkey"
+            columns: ["transshipment_port_id"]
             isOneToOne: false
             referencedRelation: "ports"
             referencedColumns: ["id"]
@@ -1015,6 +1033,27 @@ export type Database = {
         Args: { p_charge_ids: string[]; p_job_id: string }
         Returns: string
       }
+      create_job: {
+        Args: {
+          p_branch_id: string
+          p_company_id: string
+          p_customer_id: string
+          p_hbl: string | null
+          p_job_number: string
+          p_mbl: string | null
+          p_planned_container_count: number
+          p_planned_container_type: string
+          p_pod_id: string
+          p_pol_id: string
+          p_service_ids: string[]
+          p_status: Database["public"]["Enums"]["job_status"]
+          p_transport_mode: Database["public"]["Enums"]["transport_mode"]
+          p_transshipment_port_id: string | null
+          p_vessel: string | null
+          p_voyage: string | null
+        }
+        Returns: string
+      }
       has_company_role: {
         Args: {
           allowed_roles: Database["public"]["Enums"]["company_role"][]
@@ -1027,6 +1066,27 @@ export type Database = {
         Returns: boolean
       }
       issue_invoice: { Args: { p_invoice_id: string }; Returns: string }
+      update_job: {
+        Args: {
+          p_branch_id: string
+          p_customer_id: string
+          p_hbl: string | null
+          p_job_id: string
+          p_job_number: string
+          p_mbl: string | null
+          p_planned_container_count: number
+          p_planned_container_type: string
+          p_pod_id: string
+          p_pol_id: string
+          p_service_ids: string[]
+          p_status: Database["public"]["Enums"]["job_status"]
+          p_transport_mode: Database["public"]["Enums"]["transport_mode"]
+          p_transshipment_port_id: string | null
+          p_vessel: string | null
+          p_voyage: string | null
+        }
+        Returns: string
+      }
     }
     Enums: {
       company_role: "OWNER" | "ADMIN" | "OPERATIONS" | "FINANCE" | "VIEWER"

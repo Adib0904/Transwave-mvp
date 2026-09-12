@@ -1,7 +1,9 @@
-import { Controller, Get, Inject, Param, ParseUUIDPipe, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { createChargeSchema, saveContainerSchema, saveJobSchema, type CreateCharge, type SaveContainer, type SaveJob } from "@transwave/contracts";
 import { SupabaseAuthGuard } from "../auth/supabase-auth.guard.js";
 import type { AuthenticatedRequest } from "../auth/authenticated-request.js";
+import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
 import { JobsService } from "./jobs.service.js";
 
 @ApiTags("jobs")
@@ -17,9 +19,41 @@ export class JobsController {
     return this.jobs.list(request.database);
   }
 
+  @Post()
+  @ApiOperation({ summary: "Create a job with its route and unique services" })
+  create(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveJobSchema)) input: SaveJob) {
+    return this.jobs.create(request.database, request.auth.userId, input);
+  }
+
   @Get(":id")
   @ApiOperation({ summary: "Get a job with job-level containers, services and charges" })
   findOne(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) {
     return this.jobs.findOne(request.database, id);
+  }
+
+  @Patch(":id")
+  @ApiOperation({ summary: "Update all editable job and route details" })
+  update(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveJobSchema)) input: SaveJob) {
+    return this.jobs.update(request.database, id, input);
+  }
+
+  @Post(":id/containers")
+  addContainer(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveContainerSchema)) input: SaveContainer) {
+    return this.jobs.addContainer(request.database, id, input);
+  }
+
+  @Delete(":id/containers/:containerId")
+  removeContainer(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Param("containerId", ParseUUIDPipe) containerId: string) {
+    return this.jobs.removeContainer(request.database, id, containerId);
+  }
+
+  @Post(":id/charges")
+  saveCharge(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(createChargeSchema)) input: CreateCharge) {
+    return this.jobs.saveCharge(request.database, id, input);
+  }
+
+  @Delete(":id/charges/:chargeId")
+  removeCharge(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Param("chargeId", ParseUUIDPipe) chargeId: string) {
+    return this.jobs.removeCharge(request.database, id, chargeId);
   }
 }

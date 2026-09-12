@@ -11,7 +11,11 @@ async function bootstrap() {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
 
   app.setGlobalPrefix("api/v1");
-  app.enableCors({ origin: config.get("WEB_ORIGIN", { infer: true }), credentials: true });
+  app.enableCors({
+    origin: config.get("WEB_ORIGIN", { infer: true }),
+    credentials: true,
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+  });
   app.enableShutdownHooks();
   const openApi = new DocumentBuilder()
     .setTitle("TransWave API")
