@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { DatabaseService } from "../database/database.service.js";
 import type { AuthenticatedRequest } from "./authenticated-request.js";
@@ -18,6 +18,15 @@ export class SupabaseAuthGuard implements CanActivate {
     const { data, error } = await database.auth.getClaims(accessToken);
     const userId = data?.claims.sub;
     if (error || !userId) throw new UnauthorizedException("The access token is invalid or expired");
+
+    const membership = await database
+      .from("company_members")
+      .select("user_id")
+      .eq("user_id", userId)
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    if (membership.error || !membership.data) throw new ForbiddenException("No active company access is assigned to this account");
 
     const authenticated = request as AuthenticatedRequest;
     authenticated.auth = { accessToken, userId, email: typeof data.claims.email === "string" ? data.claims.email : "unknown@transwave.local" };

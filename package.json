@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test:unit": "npm run test:unit --workspaces --if-present",
+    "test:security": "node scripts/security-local.mjs",
     "test:smoke": "npm run db:reset && node scripts/smoke-local.mjs",
     "db:start": "supabase start",
     "db:stop": "supabase stop",

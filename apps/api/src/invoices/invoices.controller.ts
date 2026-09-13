@@ -31,12 +31,12 @@ export class InvoicesController {
     @Req() request: AuthenticatedRequest,
     @Body(new ZodValidationPipe(createDraftSchema)) input: CreateDraft
   ) {
-    return this.invoices.createDraft(request.database, input.jobId, input.chargeIds);
+    return this.invoices.createDraft(request.database, request.auth.userId, input.jobId, input.chargeIds);
   }
 
   @Post(":id/issue")
   @ApiOperation({ summary: "Issue a draft and atomically allocate its permanent invoice number" })
   issue(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) {
-    return this.invoices.issue(request.database, id);
+    return this.invoices.issue(request.database, request.auth.userId, id);
   }
 }

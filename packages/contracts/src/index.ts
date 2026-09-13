@@ -33,7 +33,7 @@ export const createManagedUserSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   name: z.string().trim().min(2).max(120),
   role: roleSchema,
-  temporaryPassword: z.string().min(10).max(128)
+  temporaryPassword: z.string().min(12).max(128)
 });
 
 export const updateManagedUserSchema = z.object({
@@ -56,7 +56,6 @@ export const customerSchema = z.object({
 });
 
 export const saveCustomerSchema = z.object({
-  code: z.string().trim().min(1).max(32),
   name: z.string().trim().min(1).max(200),
   trn: z.string().trim().max(32).nullable().default(null),
   email: z.union([z.string().trim().email(), z.literal(""), z.null()]).transform(value => value || null),
@@ -153,11 +152,27 @@ export const jobSummarySchema = z.object({
 
 export const jobDetailSchema = jobSummarySchema.extend({
   customerId: uuidSchema,
+  branchId: uuidSchema,
   polId: uuidSchema,
   podId: uuidSchema,
   transshipmentPortId: uuidSchema.nullable(),
   vessel: z.string().nullable(),
   voyage: z.string().nullable(),
+  sailedDate: z.string().nullable(),
+  originPort: z.string().nullable(),
+  placeOfDelivery: z.string().nullable(),
+  shipper: z.string().nullable(),
+  consignee: z.string().nullable(),
+  notifyName: z.string().nullable(),
+  commodity: z.string().nullable(),
+  salesPerson: z.string().nullable(),
+  customerReference: z.string().nullable(),
+  packageCount: z.number().int().nonnegative().nullable(),
+  weightKg: z.number().nonnegative().nullable(),
+  volumeCbm: z.number().nonnegative().nullable(),
+  chargeableWeightKg: z.number().nonnegative().nullable(),
+  customsDocReference: z.string().nullable(),
+  shipmentTerms: z.string().nullable(),
   hbl: z.string().nullable(),
   mbl: z.string().nullable(),
   services: z.array(serviceSchema.extend({ jobServiceId: uuidSchema })),
@@ -177,7 +192,6 @@ export const createChargeSchema = z.object({
 });
 
 export const saveJobSchema = z.object({
-  jobNumber: z.string().trim().min(1).max(64),
   customerId: uuidSchema,
   branchId: uuidSchema,
   transportMode: transportModeSchema,
@@ -189,11 +203,30 @@ export const saveJobSchema = z.object({
   transshipmentPortId: uuidSchema.nullable().default(null),
   vessel: z.string().trim().max(160).nullable().default(null),
   voyage: z.string().trim().max(80).nullable().default(null),
+  sailedDate: z.union([z.iso.date(), z.literal(""), z.null()]).transform(value => value || null).default(null),
+  originPort: z.string().trim().max(160).nullable().default(null),
+  placeOfDelivery: z.string().trim().max(200).nullable().default(null),
+  shipper: z.string().trim().max(200).nullable().default(null),
+  consignee: z.string().trim().max(200).nullable().default(null),
+  notifyName: z.string().trim().max(200).nullable().default(null),
+  commodity: z.string().trim().max(300).nullable().default(null),
+  salesPerson: z.string().trim().max(160).nullable().default(null),
+  customerReference: z.string().trim().max(120).nullable().default(null),
+  packageCount: z.number().int().nonnegative().max(1_000_000).nullable().default(null),
+  weightKg: z.number().nonnegative().max(1_000_000_000).nullable().default(null),
+  volumeCbm: z.number().nonnegative().max(1_000_000_000).nullable().default(null),
+  chargeableWeightKg: z.number().nonnegative().max(1_000_000_000).nullable().default(null),
+  customsDocReference: z.string().trim().max(160).nullable().default(null),
+  shipmentTerms: z.string().trim().max(80).nullable().default(null),
   hbl: z.string().trim().max(100).nullable().default(null),
   mbl: z.string().trim().max(100).nullable().default(null),
+  containerNumbers: z.array(z.string().trim().toUpperCase().regex(/^[A-Z]{4}\d{7}$/)).max(999).default([])
+    .refine(numbers => new Set(numbers).size === numbers.length, "Container numbers must be unique"),
   serviceIds: z.array(uuidSchema).min(1).refine(ids => new Set(ids).size === ids.length, "Services must be unique")
 }).refine(value => value.polId !== value.podId, { message: "POL and POD must be different", path: ["podId"] })
-  .refine(value => !value.transshipmentPortId || (value.transshipmentPortId !== value.polId && value.transshipmentPortId !== value.podId), { message: "Transshipment port must differ from POL and POD", path: ["transshipmentPortId"] });
+  .refine(value => !value.transshipmentPortId || (value.transshipmentPortId !== value.polId && value.transshipmentPortId !== value.podId), { message: "Transshipment port must differ from POL and POD", path: ["transshipmentPortId"] })
+  .refine(value => value.containerNumbers.length <= value.plannedContainerCount, { message: "Container numbers cannot exceed the planned container count", path: ["containerNumbers"] })
+  .refine(value => !value.containerNumbers.length || /^(20|40|45)/.test(value.plannedContainerType), { message: "Select a container equipment type before entering container numbers", path: ["plannedContainerType"] });
 
 export const saveContainerSchema = z.object({
   containerNumber: z.string().trim().toUpperCase().regex(/^[A-Z]{4}\d{7}$/),
@@ -233,8 +266,16 @@ export const invoiceSchema = z.object({
   status: invoiceStatusSchema,
   createdAt: z.string().datetime(),
   issuedAt: z.string().datetime().nullable(),
+  invoiceDate: z.string().nullable(),
+  dueDate: z.string().nullable(),
+  companyName: z.string(),
+  companyTrn: z.string().nullable(),
+  companyAddress: z.string().nullable(),
+  branchName: z.string(),
+  branchAddress: z.string().nullable(),
   customerName: z.string(),
   customerTrn: z.string().nullable(),
+  customerAddress: z.string().nullable(),
   paymentTermsDays: z.number().int().nonnegative(),
   jobNumber: z.string(),
   polName: z.string(),
@@ -243,6 +284,23 @@ export const invoiceSchema = z.object({
   transportMode: transportModeSchema,
   vessel: z.string().nullable(),
   voyage: z.string().nullable(),
+  sailedDate: z.string().nullable(),
+  originPort: z.string().nullable(),
+  placeOfDelivery: z.string().nullable(),
+  shipper: z.string().nullable(),
+  consignee: z.string().nullable(),
+  notifyName: z.string().nullable(),
+  commodity: z.string().nullable(),
+  salesPerson: z.string().nullable(),
+  customerReference: z.string().nullable(),
+  packageCount: z.number().int().nonnegative().nullable(),
+  weightKg: z.number().nonnegative().nullable(),
+  volumeCbm: z.number().nonnegative().nullable(),
+  chargeableWeightKg: z.number().nonnegative().nullable(),
+  customsDocReference: z.string().nullable(),
+  shipmentTerms: z.string().nullable(),
+  hbl: z.string().nullable(),
+  mbl: z.string().nullable(),
   plannedContainerType: z.string(),
   plannedContainerCount: z.number().int().positive(),
   containers: z.array(containerSchema),

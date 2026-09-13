@@ -3,7 +3,7 @@ import type { Customer, MasterData, Port, SaveCustomer, SavePort, SaveService } 
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal } from "../common/format.js";
-import { resolveTenant } from "../common/tenant.js";
+import { requireTenantRole, resolveTenant } from "../common/tenant.js";
 
 type CustomerRow = Database["public"]["Tables"]["customers"]["Row"];
 type PortRow = Database["public"]["Tables"]["ports"]["Row"];
@@ -36,15 +36,14 @@ export class MastersService {
   }
 
   async createCustomer(database: TransWaveDatabaseClient, userId: string, input: SaveCustomer) {
-    const tenant = await resolveTenant(database, userId);
-    const result = await database.from("customers").insert({ company_id: tenant.companyId, customer_code: input.code, company_name: input.name, trn: input.trn, email: input.email, phone: input.phone, billing_address: input.billingAddress, default_currency: input.defaultCurrency, payment_terms_days: input.paymentTermsDays, active: input.active }).select("*").single();
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const result = await database.from("customers").insert({ company_id: tenant.companyId, customer_code: "", company_name: input.name, trn: input.trn, email: input.email, phone: input.phone, billing_address: input.billingAddress, default_currency: input.defaultCurrency, payment_terms_days: input.paymentTermsDays, active: input.active }).select("*").single();
     return mapCustomer(requireData(result.data, result.error, "Customer was not created"));
   }
 
   async updateCustomer(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SaveCustomer>) {
-    const tenant = await resolveTenant(database, userId);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
     const values: Database["public"]["Tables"]["customers"]["Update"] = {};
-    if (input.code !== undefined) values.customer_code = input.code;
     if (input.name !== undefined) values.company_name = input.name;
     if (input.trn !== undefined) values.trn = input.trn;
     if (input.email !== undefined) values.email = input.email;
@@ -58,13 +57,13 @@ export class MastersService {
   }
 
   async createPort(database: TransWaveDatabaseClient, userId: string, input: SavePort) {
-    const tenant = await resolveTenant(database, userId);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN"]);
     const result = await database.from("ports").insert({ company_id: tenant.companyId, un_locode: input.unLocode, name: input.name, country_code: input.countryCode, active: input.active }).select("*").single();
     return mapPort(requireData(result.data, result.error, "Port was not created"), tenant.companyId);
   }
 
   async updatePort(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SavePort>) {
-    const tenant = await resolveTenant(database, userId);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN"]);
     const values: Database["public"]["Tables"]["ports"]["Update"] = {};
     if (input.unLocode !== undefined) values.un_locode = input.unLocode;
     if (input.name !== undefined) values.name = input.name;
@@ -76,13 +75,13 @@ export class MastersService {
   }
 
   async createService(database: TransWaveDatabaseClient, userId: string, input: SaveService) {
-    const tenant = await resolveTenant(database, userId);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN"]);
     const result = await database.from("services").insert({ company_id: tenant.companyId, code: input.code, name: input.name, default_uom: input.defaultUom, default_currency: input.defaultCurrency, default_tax_rate_id: input.defaultTaxRateId, active: input.active }).select("*").single();
     return mapService(requireData(result.data, result.error, "Service was not created"));
   }
 
   async updateService(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SaveService>) {
-    const tenant = await resolveTenant(database, userId);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN"]);
     const values: Database["public"]["Tables"]["services"]["Update"] = {};
     if (input.code !== undefined) values.code = input.code;
     if (input.name !== undefined) values.name = input.name;

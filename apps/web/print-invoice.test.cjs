@@ -6,7 +6,7 @@ const exportsObject = {};
 vm.runInNewContext(ts.transpileModule(fs.readFileSync(`${__dirname}/app/print-invoice.ts`, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: exportsObject });
 function fixture() {
   const listeners = new Map(); let fallback; let calls = 0; let cleared = 0;
-  const env = { document: { title: 'TransWave' }, print: () => { calls++; assert.equal(env.document.title, 'INV-2026-000145'); }, addEventListener: (event, listener) => listeners.set(event, listener), removeEventListener: event => listeners.delete(event), setTimeout: callback => { fallback = callback; return 1; }, clearTimeout: () => { cleared++; } };
+  const env = { document: { title: 'TransWave' }, print: () => { calls++; assert.equal(env.document.title, 'INV 2026 000145'); }, addEventListener: (event, listener) => listeners.set(event, listener), removeEventListener: event => listeners.delete(event), setTimeout: callback => { fallback = callback; return 1; }, clearTimeout: () => { cleared++; } };
   return { env, listeners, fallback: () => fallback(), calls: () => calls, cleared: () => cleared };
 }
 const first = fixture();
@@ -21,4 +21,5 @@ assert.equal(second.env.document.title, 'TransWave'); assert.equal(second.listen
 const failure = fixture(); failure.env.print = () => { throw new Error('print failed'); };
 assert.throws(() => exportsObject.printInvoice('INV/2026/000145', failure.env));
 assert.equal(failure.env.document.title, 'TransWave'); assert.equal(failure.listeners.size, 0);
+assert.equal(exportsObject.invoicePrintTitle({ vessel: 'OSHAIRIJ', plannedContainerCount: 42, plannedContainerType: '20SD', invoiceDate: '2026-09-12', issuedAt: null, invoiceNumber: 'INV/2' }), 'OSHAIRIJ 42X20FT INVOICE 2026-09-12');
 console.log('PASS: print called once, sanitized title, afterprint/fallback/error cleanup and idempotent restore');

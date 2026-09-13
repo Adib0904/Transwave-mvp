@@ -479,17 +479,22 @@ export type Database = {
           branch_code_snapshot: string
           branch_id: string
           branch_name_snapshot: string
+          chargeable_weight_kg_snapshot: number | null
+          commodity_snapshot: string | null
           company_address_snapshot: string | null
           company_id: string
           company_name_snapshot: string
           company_trn_snapshot: string | null
+          consignee_snapshot: string | null
           containers_snapshot: Json
           created_at: string
           created_by: string
           customer_address_snapshot: string | null
           customer_id: string
           customer_name_snapshot: string
+          customer_reference_snapshot: string | null
           customer_trn_snapshot: string | null
+          customs_doc_reference_snapshot: string | null
           draft_reference: string
           due_date: string | null
           hbl_snapshot: string | null
@@ -500,11 +505,19 @@ export type Database = {
           job_id: string
           job_number_snapshot: string
           mbl_snapshot: string | null
+          notify_name_snapshot: string | null
+          origin_port_snapshot: string | null
+          package_count_snapshot: number | null
           payment_terms_days_snapshot: number
+          place_of_delivery_snapshot: string | null
           planned_container_count_snapshot: number
           planned_container_type_snapshot: string
           pod_snapshot: string
           pol_snapshot: string
+          sailed_at_snapshot: string | null
+          sales_person_snapshot: string | null
+          shipment_terms_snapshot: string | null
+          shipper_snapshot: string | null
           status: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed: number
           total_aed: number
@@ -513,24 +526,31 @@ export type Database = {
           updated_at: string
           vat_amount_aed: number
           vessel_snapshot: string | null
+          volume_cbm_snapshot: number | null
           voyage_snapshot: string | null
+          weight_kg_snapshot: number | null
         }
         Insert: {
           branch_address_snapshot?: string | null
           branch_code_snapshot: string
           branch_id: string
           branch_name_snapshot: string
+          chargeable_weight_kg_snapshot?: number | null
+          commodity_snapshot?: string | null
           company_address_snapshot?: string | null
           company_id: string
           company_name_snapshot: string
           company_trn_snapshot?: string | null
+          consignee_snapshot?: string | null
           containers_snapshot?: Json
           created_at?: string
           created_by?: string
           customer_address_snapshot?: string | null
           customer_id: string
           customer_name_snapshot: string
+          customer_reference_snapshot?: string | null
           customer_trn_snapshot?: string | null
+          customs_doc_reference_snapshot?: string | null
           draft_reference?: string
           due_date?: string | null
           hbl_snapshot?: string | null
@@ -541,11 +561,19 @@ export type Database = {
           job_id: string
           job_number_snapshot: string
           mbl_snapshot?: string | null
+          notify_name_snapshot?: string | null
+          origin_port_snapshot?: string | null
+          package_count_snapshot?: number | null
           payment_terms_days_snapshot: number
+          place_of_delivery_snapshot?: string | null
           planned_container_count_snapshot: number
           planned_container_type_snapshot: string
           pod_snapshot: string
           pol_snapshot: string
+          sailed_at_snapshot?: string | null
+          sales_person_snapshot?: string | null
+          shipment_terms_snapshot?: string | null
+          shipper_snapshot?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed?: number
           total_aed?: number
@@ -554,24 +582,31 @@ export type Database = {
           updated_at?: string
           vat_amount_aed?: number
           vessel_snapshot?: string | null
+          volume_cbm_snapshot?: number | null
           voyage_snapshot?: string | null
+          weight_kg_snapshot?: number | null
         }
         Update: {
           branch_address_snapshot?: string | null
           branch_code_snapshot?: string
           branch_id?: string
           branch_name_snapshot?: string
+          chargeable_weight_kg_snapshot?: number | null
+          commodity_snapshot?: string | null
           company_address_snapshot?: string | null
           company_id?: string
           company_name_snapshot?: string
           company_trn_snapshot?: string | null
+          consignee_snapshot?: string | null
           containers_snapshot?: Json
           created_at?: string
           created_by?: string
           customer_address_snapshot?: string | null
           customer_id?: string
           customer_name_snapshot?: string
+          customer_reference_snapshot?: string | null
           customer_trn_snapshot?: string | null
+          customs_doc_reference_snapshot?: string | null
           draft_reference?: string
           due_date?: string | null
           hbl_snapshot?: string | null
@@ -582,11 +617,19 @@ export type Database = {
           job_id?: string
           job_number_snapshot?: string
           mbl_snapshot?: string | null
+          notify_name_snapshot?: string | null
+          origin_port_snapshot?: string | null
+          package_count_snapshot?: number | null
           payment_terms_days_snapshot?: number
+          place_of_delivery_snapshot?: string | null
           planned_container_count_snapshot?: number
           planned_container_type_snapshot?: string
           pod_snapshot?: string
           pol_snapshot?: string
+          sailed_at_snapshot?: string | null
+          sales_person_snapshot?: string | null
+          shipment_terms_snapshot?: string | null
+          shipper_snapshot?: string | null
           status?: Database["public"]["Enums"]["invoice_status"]
           subtotal_aed?: number
           total_aed?: number
@@ -595,7 +638,9 @@ export type Database = {
           updated_at?: string
           vat_amount_aed?: number
           vessel_snapshot?: string | null
+          volume_cbm_snapshot?: number | null
           voyage_snapshot?: string | null
+          weight_kg_snapshot?: number | null
         }
         Relationships: [
           {
@@ -908,52 +953,88 @@ export type Database = {
       }
       shipments: {
         Row: {
+          chargeable_weight_kg: number | null
           commodity: string | null
           company_id: string
+          consignee: string | null
           created_at: string
+          customer_reference: string | null
+          customs_doc_reference: string | null
           hbl: string | null
           job_id: string
           mbl: string | null
+          notify_name: string | null
+          origin_port: string | null
+          package_count: number | null
           place_of_delivery: string | null
           port_of_discharge_id: string
           port_of_loading_id: string
           sailed_at: string | null
+          sales_person: string | null
+          shipment_terms: string | null
+          shipper: string | null
           transshipment_port_id: string | null
           updated_at: string
           vessel: string | null
+          volume_cbm: number | null
           voyage: string | null
+          weight_kg: number | null
         }
         Insert: {
+          chargeable_weight_kg?: number | null
           commodity?: string | null
           company_id: string
+          consignee?: string | null
           created_at?: string
+          customer_reference?: string | null
+          customs_doc_reference?: string | null
           hbl?: string | null
           job_id: string
           mbl?: string | null
+          notify_name?: string | null
+          origin_port?: string | null
+          package_count?: number | null
           place_of_delivery?: string | null
           port_of_discharge_id: string
           port_of_loading_id: string
           sailed_at?: string | null
+          sales_person?: string | null
+          shipment_terms?: string | null
+          shipper?: string | null
           transshipment_port_id?: string | null
           updated_at?: string
           vessel?: string | null
+          volume_cbm?: number | null
           voyage?: string | null
+          weight_kg?: number | null
         }
         Update: {
+          chargeable_weight_kg?: number | null
           commodity?: string | null
           company_id?: string
+          consignee?: string | null
           created_at?: string
+          customer_reference?: string | null
+          customs_doc_reference?: string | null
           hbl?: string | null
           job_id?: string
           mbl?: string | null
+          notify_name?: string | null
+          origin_port?: string | null
+          package_count?: number | null
           place_of_delivery?: string | null
           port_of_discharge_id?: string
           port_of_loading_id?: string
           sailed_at?: string | null
+          sales_person?: string | null
+          shipment_terms?: string | null
+          shipper?: string | null
           transshipment_port_id?: string | null
           updated_at?: string
           vessel?: string | null
+          volume_cbm?: number | null
           voyage?: string | null
+          weight_kg?: number | null
         }
         Relationships: [
           {
@@ -1038,9 +1119,9 @@ export type Database = {
           p_branch_id: string
           p_company_id: string
           p_customer_id: string
-          p_hbl: string | null
+          p_hbl: string
           p_job_number: string
-          p_mbl: string | null
+          p_mbl: string
           p_planned_container_count: number
           p_planned_container_type: string
           p_pod_id: string
@@ -1048,9 +1129,45 @@ export type Database = {
           p_service_ids: string[]
           p_status: Database["public"]["Enums"]["job_status"]
           p_transport_mode: Database["public"]["Enums"]["transport_mode"]
-          p_transshipment_port_id: string | null
-          p_vessel: string | null
-          p_voyage: string | null
+          p_transshipment_port_id: string
+          p_vessel: string
+          p_voyage: string
+        }
+        Returns: string
+      }
+      create_job_with_details: {
+        Args: {
+          p_branch_id: string
+          p_chargeable_weight_kg: number
+          p_commodity: string
+          p_company_id: string
+          p_consignee: string
+          p_container_numbers: string[]
+          p_customer_id: string
+          p_customer_reference: string
+          p_customs_doc_reference: string
+          p_hbl: string
+          p_mbl: string
+          p_notify_name: string
+          p_origin_port: string
+          p_package_count: number
+          p_place_of_delivery: string
+          p_planned_container_count: number
+          p_planned_container_type: string
+          p_pod_id: string
+          p_pol_id: string
+          p_sailed_at: string
+          p_sales_person: string
+          p_service_ids: string[]
+          p_shipment_terms: string
+          p_shipper: string
+          p_status: Database["public"]["Enums"]["job_status"]
+          p_transport_mode: Database["public"]["Enums"]["transport_mode"]
+          p_transshipment_port_id: string
+          p_vessel: string
+          p_volume_cbm: number
+          p_voyage: string
+          p_weight_kg: number
         }
         Returns: string
       }
@@ -1070,10 +1187,10 @@ export type Database = {
         Args: {
           p_branch_id: string
           p_customer_id: string
-          p_hbl: string | null
+          p_hbl: string
           p_job_id: string
           p_job_number: string
-          p_mbl: string | null
+          p_mbl: string
           p_planned_container_count: number
           p_planned_container_type: string
           p_pod_id: string
@@ -1081,9 +1198,44 @@ export type Database = {
           p_service_ids: string[]
           p_status: Database["public"]["Enums"]["job_status"]
           p_transport_mode: Database["public"]["Enums"]["transport_mode"]
-          p_transshipment_port_id: string | null
-          p_vessel: string | null
-          p_voyage: string | null
+          p_transshipment_port_id: string
+          p_vessel: string
+          p_voyage: string
+        }
+        Returns: string
+      }
+      update_job_with_details: {
+        Args: {
+          p_branch_id: string
+          p_chargeable_weight_kg: number
+          p_commodity: string
+          p_consignee: string
+          p_customer_id: string
+          p_customer_reference: string
+          p_customs_doc_reference: string
+          p_hbl: string
+          p_job_id: string
+          p_mbl: string
+          p_notify_name: string
+          p_origin_port: string
+          p_package_count: number
+          p_place_of_delivery: string
+          p_planned_container_count: number
+          p_planned_container_type: string
+          p_pod_id: string
+          p_pol_id: string
+          p_sailed_at: string
+          p_sales_person: string
+          p_service_ids: string[]
+          p_shipment_terms: string
+          p_shipper: string
+          p_status: Database["public"]["Enums"]["job_status"]
+          p_transport_mode: Database["public"]["Enums"]["transport_mode"]
+          p_transshipment_port_id: string
+          p_vessel: string
+          p_volume_cbm: number
+          p_voyage: string
+          p_weight_kg: number
         }
         Returns: string
       }

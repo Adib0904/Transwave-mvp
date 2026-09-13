@@ -34,26 +34,26 @@ export class JobsController {
   @Patch(":id")
   @ApiOperation({ summary: "Update all editable job and route details" })
   update(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveJobSchema)) input: SaveJob) {
-    return this.jobs.update(request.database, id, input);
+    return this.jobs.update(request.database, request.auth.userId, id, input);
   }
 
   @Post(":id/containers")
   addContainer(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveContainerSchema)) input: SaveContainer) {
-    return this.jobs.addContainer(request.database, id, input);
+    return this.jobs.addContainer(request.database, request.auth.userId, id, input);
   }
 
   @Delete(":id/containers/:containerId")
   removeContainer(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Param("containerId", ParseUUIDPipe) containerId: string) {
-    return this.jobs.removeContainer(request.database, id, containerId);
+    return this.jobs.removeContainer(request.database, request.auth.userId, id, containerId);
   }
 
   @Post(":id/charges")
   saveCharge(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(createChargeSchema)) input: CreateCharge) {
-    return this.jobs.saveCharge(request.database, id, input);
+    return this.jobs.saveCharge(request.database, request.auth.userId, id, input);
   }
 
   @Delete(":id/charges/:chargeId")
   removeCharge(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Param("chargeId", ParseUUIDPipe) chargeId: string) {
-    return this.jobs.removeCharge(request.database, id, chargeId);
+    return this.jobs.removeCharge(request.database, request.auth.userId, id, chargeId);
   }
 }

@@ -37,6 +37,26 @@ h3,
   text-transform: none;
 }
 
+.brand-logo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.side .logo {
+  width: 190px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.login-brand .logo.large {
+  width: min(320px, 80%);
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: #fff;
+}
+
 .logo b {
   background: #178ba6;
   color: #fff;
@@ -140,4 +160,9 @@ button:focus-visible {
 
 @media (max-width: 700px) {
   .route-fields { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1000px) {
+  .side .logo { width: 49px; padding: 6px; overflow: hidden; }
+  .side .brand-logo { width: 100%; max-width: none; transform: none; }
 }

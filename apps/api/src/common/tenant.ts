@@ -1,5 +1,5 @@
-import { NotFoundException } from "@nestjs/common";
-import type { TransWaveDatabaseClient } from "@transwave/database";
+import { ForbiddenException, NotFoundException } from "@nestjs/common";
+import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "./database-error.js";
 
 export async function resolveTenant(database: TransWaveDatabaseClient, userId: string) {
@@ -13,4 +13,14 @@ export async function resolveTenant(database: TransWaveDatabaseClient, userId: s
   if (branchResult.error) throwDatabaseError(branchResult.error);
   if (!branchResult.data) throw new NotFoundException("No active branch is configured");
   return { companyId: company.id, companyName: company.legal_name, role: membership.role, branch: branchResult.data };
+}
+
+export async function requireTenantRole(
+  database: TransWaveDatabaseClient,
+  userId: string,
+  allowedRoles: Database["public"]["Enums"]["company_role"][],
+) {
+  const tenant = await resolveTenant(database, userId);
+  if (!allowedRoles.includes(tenant.role)) throw new ForbiddenException("You do not have permission to perform this action");
+  return tenant;
 }

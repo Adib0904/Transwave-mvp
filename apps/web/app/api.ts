@@ -13,9 +13,12 @@ export class ApiError extends Error {
 }
 
 async function call<T>(session: Session, path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${session.access_token}`);
+  if (init?.body) headers.set("Content-Type", "application/json");
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}`, ...init?.headers }
+    headers
   });
   if (response.status === 204) return undefined as T;
   const data = await response.json().catch(() => null);

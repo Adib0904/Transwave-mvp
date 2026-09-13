@@ -3,6 +3,7 @@ import { containerSchema, type Invoice } from "@transwave/contracts";
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
+import { requireTenantRole } from "../common/tenant.js";
 
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 type InvoiceLineRow = Database["public"]["Tables"]["invoice_lines"]["Row"];
@@ -33,7 +34,8 @@ export class InvoicesService {
     return this.toInvoice(invoice, linesResult.data ?? []);
   }
 
-  async createDraft(database: TransWaveDatabaseClient, jobId: string, chargeIds: string[]): Promise<Invoice> {
+  async createDraft(database: TransWaveDatabaseClient, userId: string, jobId: string, chargeIds: string[]): Promise<Invoice> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
     const { data: invoiceId, error } = await database.rpc("create_invoice_draft", {
       p_job_id: jobId,
       p_charge_ids: chargeIds
@@ -42,7 +44,8 @@ export class InvoicesService {
     return this.findOne(database, invoiceId);
   }
 
-  async issue(database: TransWaveDatabaseClient, id: string): Promise<Invoice> {
+  async issue(database: TransWaveDatabaseClient, userId: string, id: string): Promise<Invoice> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
     const { error } = await database.rpc("issue_invoice", { p_invoice_id: id });
     if (error) throwDatabaseError(error);
     return this.findOne(database, id);
@@ -57,8 +60,16 @@ export class InvoicesService {
       status: invoice.status,
       createdAt: invoice.created_at,
       issuedAt: invoice.issued_at,
+      invoiceDate: invoice.invoice_date,
+      dueDate: invoice.due_date,
+      companyName: invoice.company_name_snapshot,
+      companyTrn: invoice.company_trn_snapshot,
+      companyAddress: invoice.company_address_snapshot,
+      branchName: invoice.branch_name_snapshot,
+      branchAddress: invoice.branch_address_snapshot,
       customerName: invoice.customer_name_snapshot,
       customerTrn: invoice.customer_trn_snapshot,
+      customerAddress: invoice.customer_address_snapshot,
       paymentTermsDays: invoice.payment_terms_days_snapshot,
       jobNumber: invoice.job_number_snapshot,
       polName: invoice.pol_snapshot,
@@ -67,6 +78,23 @@ export class InvoicesService {
       transportMode: invoice.transport_mode_snapshot,
       vessel: invoice.vessel_snapshot,
       voyage: invoice.voyage_snapshot,
+      sailedDate: invoice.sailed_at_snapshot,
+      originPort: invoice.origin_port_snapshot,
+      placeOfDelivery: invoice.place_of_delivery_snapshot,
+      shipper: invoice.shipper_snapshot,
+      consignee: invoice.consignee_snapshot,
+      notifyName: invoice.notify_name_snapshot,
+      commodity: invoice.commodity_snapshot,
+      salesPerson: invoice.sales_person_snapshot,
+      customerReference: invoice.customer_reference_snapshot,
+      packageCount: invoice.package_count_snapshot,
+      weightKg: invoice.weight_kg_snapshot === null ? null : Number(invoice.weight_kg_snapshot),
+      volumeCbm: invoice.volume_cbm_snapshot === null ? null : Number(invoice.volume_cbm_snapshot),
+      chargeableWeightKg: invoice.chargeable_weight_kg_snapshot === null ? null : Number(invoice.chargeable_weight_kg_snapshot),
+      customsDocReference: invoice.customs_doc_reference_snapshot,
+      shipmentTerms: invoice.shipment_terms_snapshot,
+      hbl: invoice.hbl_snapshot,
+      mbl: invoice.mbl_snapshot,
       plannedContainerType: invoice.planned_container_type_snapshot,
       plannedContainerCount: invoice.planned_container_count_snapshot,
       containers: containers.success ? containers.data : [],

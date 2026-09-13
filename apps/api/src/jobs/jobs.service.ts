@@ -3,27 +3,45 @@ import type { Charge, CreateCharge, JobDetail, JobSummary, SaveContainer, SaveJo
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
-import { resolveTenant } from "../common/tenant.js";
+import { requireTenantRole } from "../common/tenant.js";
 
 type JobRow = Database["public"]["Tables"]["jobs"]["Row"];
-type CreateJobArgs = Database["public"]["Functions"]["create_job"]["Args"];
+type CreateJobArgs = Database["public"]["Functions"]["create_job_with_details"]["Args"];
+type UpdateJobArgs = Database["public"]["Functions"]["update_job_with_details"]["Args"];
+
+export function isFullyIssuedJob(
+  jobId: string,
+  charges: Array<{ id: string; job_id: string }>,
+  invoiceLines: Array<{ job_charge_id: string; invoice_id: string }>,
+  invoices: Array<{ id: string; status: string }>
+): boolean {
+  const jobCharges = charges.filter(charge => charge.job_id === jobId);
+  if (!jobCharges.length) return false;
+
+  const issuedInvoiceIds = new Set(invoices.filter(invoice => invoice.status === "ISSUED").map(invoice => invoice.id));
+  return jobCharges.every(charge =>
+    invoiceLines.some(line => line.job_charge_id === charge.id && issuedInvoiceIds.has(line.invoice_id))
+  );
+}
 
 @Injectable()
 export class JobsService {
   async create(database: TransWaveDatabaseClient, userId: string, input: SaveJob): Promise<JobDetail> {
-    const tenant = await resolveTenant(database, userId);
-    const { data, error } = await database.rpc("create_job", { ...this.rpcInput(input), p_company_id: tenant.companyId });
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const { data, error } = await database.rpc("create_job_with_details", { ...this.rpcInput(input), p_company_id: tenant.companyId });
     if (error) throwDatabaseError(error);
     return this.findOne(database, requireData(data, null, "Job was not created"));
   }
 
-  async update(database: TransWaveDatabaseClient, id: string, input: SaveJob): Promise<JobDetail> {
-    const { data, error } = await database.rpc("update_job", { ...this.rpcInput(input), p_job_id: id });
+  async update(database: TransWaveDatabaseClient, userId: string, id: string, input: SaveJob): Promise<JobDetail> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const { data, error } = await database.rpc("update_job_with_details", { ...this.updateRpcInput(input), p_job_id: id });
     if (error) throwDatabaseError(error);
     return this.findOne(database, requireData(data, null, "Job was not updated"));
   }
 
-  async addContainer(database: TransWaveDatabaseClient, jobId: string, input: SaveContainer): Promise<JobDetail> {
+  async addContainer(database: TransWaveDatabaseClient, userId: string, jobId: string, input: SaveContainer): Promise<JobDetail> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
     const jobResult = await database.from("jobs").select("company_id").eq("id", jobId).maybeSingle();
     const job = requireData(jobResult.data, jobResult.error, "Job not found");
     const { error } = await database.from("containers").insert({ company_id: job.company_id, job_id: jobId, container_number: input.containerNumber, size: Number(input.size), container_type: input.containerType, seal_number: input.sealNumber });
@@ -31,13 +49,15 @@ export class JobsService {
     return this.findOne(database, jobId);
   }
 
-  async removeContainer(database: TransWaveDatabaseClient, jobId: string, containerId: string): Promise<JobDetail> {
+  async removeContainer(database: TransWaveDatabaseClient, userId: string, jobId: string, containerId: string): Promise<JobDetail> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
     const { error } = await database.from("containers").delete().eq("id", containerId).eq("job_id", jobId);
     if (error) throwDatabaseError(error);
     return this.findOne(database, jobId);
   }
 
-  async saveCharge(database: TransWaveDatabaseClient, jobId: string, input: CreateCharge): Promise<JobDetail> {
+  async saveCharge(database: TransWaveDatabaseClient, userId: string, jobId: string, input: CreateCharge): Promise<JobDetail> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
     const serviceResult = await database.from("job_services").select("company_id").eq("id", input.jobServiceId).eq("job_id", jobId).maybeSingle();
     const jobService = requireData(serviceResult.data, serviceResult.error, "Job service not found");
     const existing = await database.from("job_charges").select("id").eq("job_service_id", input.jobServiceId).maybeSingle();
@@ -50,7 +70,8 @@ export class JobsService {
     return this.findOne(database, jobId);
   }
 
-  async removeCharge(database: TransWaveDatabaseClient, jobId: string, chargeId: string): Promise<JobDetail> {
+  async removeCharge(database: TransWaveDatabaseClient, userId: string, jobId: string, chargeId: string): Promise<JobDetail> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
     const { error } = await database.from("job_charges").delete().eq("id", chargeId).eq("job_id", jobId);
     if (error) throwDatabaseError(error);
     return this.findOne(database, jobId);
@@ -63,12 +84,37 @@ export class JobsService {
 
     const customerIds = [...new Set(jobs.map(job => job.customer_id))];
     const jobIds = jobs.map(job => job.id);
-    const [{ data: customers, error: customersError }, { data: shipments, error: shipmentsError }] = await Promise.all([
+    const [
+      { data: customers, error: customersError },
+      { data: shipments, error: shipmentsError },
+      { data: charges, error: chargesError }
+    ] = await Promise.all([
       database.from("customers").select("id, company_name").in("id", customerIds),
-      database.from("shipments").select("job_id, port_of_loading_id, port_of_discharge_id, transshipment_port_id").in("job_id", jobIds)
+      database.from("shipments").select("job_id, port_of_loading_id, port_of_discharge_id, transshipment_port_id").in("job_id", jobIds),
+      database.from("job_charges").select("id, job_id").in("job_id", jobIds)
     ]);
     if (customersError) throwDatabaseError(customersError);
     if (shipmentsError) throwDatabaseError(shipmentsError);
+    if (chargesError) throwDatabaseError(chargesError);
+
+    const chargeIds = (charges ?? []).map(charge => charge.id);
+    const invoiceLinesResult = chargeIds.length
+      ? await database.from("invoice_lines").select("job_charge_id, invoice_id").in("job_charge_id", chargeIds)
+      : { data: [], error: null };
+    if (invoiceLinesResult.error) throwDatabaseError(invoiceLinesResult.error);
+
+    const invoiceIds = [...new Set((invoiceLinesResult.data ?? []).map(line => line.invoice_id))];
+    const invoicesResult = invoiceIds.length
+      ? await database.from("invoices").select("id, status").in("id", invoiceIds)
+      : { data: [], error: null };
+    if (invoicesResult.error) throwDatabaseError(invoicesResult.error);
+
+    const activeJobs = jobs.filter(job => !isFullyIssuedJob(
+      job.id,
+      charges ?? [],
+      invoiceLinesResult.data ?? [],
+      invoicesResult.data ?? []
+    ));
 
     const portIds = [...new Set((shipments ?? []).flatMap(shipment => [shipment.port_of_loading_id, shipment.port_of_discharge_id, shipment.transshipment_port_id]).filter((id): id is string => Boolean(id)))];
     const portsResult = portIds.length
@@ -79,7 +125,7 @@ export class JobsService {
     const customersById = new Map((customers ?? []).map(customer => [customer.id, customer.company_name]));
     const shipmentsByJob = new Map((shipments ?? []).map(shipment => [shipment.job_id, shipment]));
     const portsById = new Map((portsResult.data ?? []).map(port => [port.id, port.name]));
-    return jobs.map(job => this.toSummary(job, customersById, shipmentsByJob, portsById));
+    return activeJobs.map(job => this.toSummary(job, customersById, shipmentsByJob, portsById));
   }
 
   async findOne(database: TransWaveDatabaseClient, id: string): Promise<JobDetail> {
@@ -152,11 +198,27 @@ export class JobsService {
         portsById
       ),
       customerId: customer.id,
+      branchId: job.branch_id,
       polId: shipment.port_of_loading_id,
       podId: shipment.port_of_discharge_id,
       transshipmentPortId: shipment.transshipment_port_id,
       vessel: shipment.vessel,
       voyage: shipment.voyage,
+      sailedDate: shipment.sailed_at,
+      originPort: shipment.origin_port,
+      placeOfDelivery: shipment.place_of_delivery,
+      shipper: shipment.shipper,
+      consignee: shipment.consignee,
+      notifyName: shipment.notify_name,
+      commodity: shipment.commodity,
+      salesPerson: shipment.sales_person,
+      customerReference: shipment.customer_reference,
+      packageCount: shipment.package_count,
+      weightKg: shipment.weight_kg === null ? null : Number(shipment.weight_kg),
+      volumeCbm: shipment.volume_cbm === null ? null : Number(shipment.volume_cbm),
+      chargeableWeightKg: shipment.chargeable_weight_kg === null ? null : Number(shipment.chargeable_weight_kg),
+      customsDocReference: shipment.customs_doc_reference,
+      shipmentTerms: shipment.shipment_terms,
       hbl: shipment.hbl,
       mbl: shipment.mbl,
       services: jobServices.flatMap(item => {
@@ -196,6 +258,12 @@ export class JobsService {
   }
 
   private rpcInput(input: SaveJob): Omit<CreateJobArgs, "p_company_id"> {
-    return { p_branch_id: input.branchId, p_customer_id: input.customerId, p_job_number: input.jobNumber, p_status: input.status, p_transport_mode: input.transportMode, p_planned_container_type: input.plannedContainerType, p_planned_container_count: input.plannedContainerCount, p_pol_id: input.polId, p_pod_id: input.podId, p_transshipment_port_id: input.transshipmentPortId, p_vessel: input.vessel, p_voyage: input.voyage, p_hbl: input.hbl, p_mbl: input.mbl, p_service_ids: input.serviceIds };
+    return { p_branch_id: input.branchId, p_customer_id: input.customerId, p_status: input.status, p_transport_mode: input.transportMode, p_planned_container_type: input.plannedContainerType, p_planned_container_count: input.plannedContainerCount, p_pol_id: input.polId, p_pod_id: input.podId, p_transshipment_port_id: input.transshipmentPortId, p_vessel: input.vessel, p_voyage: input.voyage, p_sailed_at: input.sailedDate, p_origin_port: input.originPort, p_place_of_delivery: input.placeOfDelivery, p_shipper: input.shipper, p_consignee: input.consignee, p_notify_name: input.notifyName, p_commodity: input.commodity, p_sales_person: input.salesPerson, p_customer_reference: input.customerReference, p_package_count: input.packageCount, p_hbl: input.hbl, p_mbl: input.mbl, p_weight_kg: input.weightKg, p_volume_cbm: input.volumeCbm, p_chargeable_weight_kg: input.chargeableWeightKg, p_customs_doc_reference: input.customsDocReference, p_shipment_terms: input.shipmentTerms, p_container_numbers: input.containerNumbers, p_service_ids: input.serviceIds } as unknown as Omit<CreateJobArgs, "p_company_id">;
+  }
+
+  private updateRpcInput(input: SaveJob): Omit<UpdateJobArgs, "p_job_id"> {
+    const values: Partial<Omit<CreateJobArgs, "p_company_id">> = { ...this.rpcInput(input) };
+    delete values.p_container_numbers;
+    return values as Omit<UpdateJobArgs, "p_job_id">;
   }
 }
