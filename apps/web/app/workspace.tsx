@@ -6,6 +6,7 @@ import { api } from "./api";
 import { useAuth } from "./auth";
 import { invoicePrintTitle, printInvoice } from "./print-invoice";
 import { clearJobFormDraft, readJobFormDraft, saveJobFormDraft } from "./job-form-draft";
+import { parseContainerManifest } from "./container-manifest";
 import "./invoice-flow.css";
 import "./job-editor.css";
 
@@ -144,6 +145,7 @@ function JobEditor({initial,data,draftOwner,close,save}:{initial:JobDetail|null;
   const formRef=useRef<HTMLFormElement>(null);
   const [serviceIds,setServiceIds]=useState(initial?.services.map(s=>s.id)??[]);
   const [draftSavedAt,setDraftSavedAt]=useState<string|null>(null);
+  const [detectedContainers,setDetectedContainers]=useState(0);
 
   useEffect(()=>{
     if(initial||!formRef.current) return;
@@ -156,6 +158,10 @@ function JobEditor({initial,data,draftOwner,close,save}:{initial:JobDetail|null;
     const availableServices=new Set(data.services.map(service=>service.id));
     setServiceIds(draft.serviceIds.filter(id=>availableServices.has(id)));
     setDraftSavedAt(draft.savedAt);
+    const detected=parseContainerManifest(draft.values.containerNumbers??"").length;
+    setDetectedContainers(detected);
+    const countInput=formRef.current.elements.namedItem("count") as HTMLInputElement|null;
+    if(countInput&&detected) countInput.value=String(detected);
   },[data.services,draftOwner,initial]);
 
   function persistDraft(form:HTMLFormElement,nextServiceIds=serviceIds){
@@ -175,20 +181,37 @@ function JobEditor({initial,data,draftOwner,close,save}:{initial:JobDetail|null;
     formRef.current?.reset();
     setServiceIds([]);
     setDraftSavedAt(null);
+    setDetectedContainers(0);
   }
 
   function submit(event:FormEvent<HTMLFormElement>){
     event.preventDefault(); const d=new FormData(event.currentTarget);
-    const containerNumbers=String(d.get("containerNumbers")||"").split(/[\n,]+/).map(value=>value.trim().toUpperCase()).filter(Boolean);
+    const containerManifest=String(d.get("containerNumbers")||"");
+    const containerNumbers=parseContainerManifest(containerManifest);
+    if(containerManifest.trim()&&!containerNumbers.length){
+      const input=event.currentTarget.elements.namedItem("containerNumbers") as HTMLTextAreaElement|null;
+      input?.setCustomValidity("No valid container numbers found. Use four letters followed by seven digits, for example DOLU2008497.");
+      input?.reportValidity();
+      return;
+    }
     void save({customerId:String(d.get("customerId")),branchId:String(d.get("branchId")),transportMode:String(d.get("mode")) as SaveJob["transportMode"],status:String(d.get("status")) as SaveJob["status"],plannedContainerType:String(d.get("equipment")),plannedContainerCount:Number(d.get("count")),polId:String(d.get("pol")),podId:String(d.get("pod")),transshipmentPortId:nullable(d,"tp"),vessel:nullable(d,"vessel"),voyage:nullable(d,"voyage"),sailedDate:nullable(d,"sailedDate"),originPort:nullable(d,"originPort"),placeOfDelivery:nullable(d,"placeOfDelivery"),shipper:nullable(d,"shipper"),consignee:nullable(d,"consignee"),notifyName:nullable(d,"notifyName"),commodity:nullable(d,"commodity"),salesPerson:nullable(d,"salesPerson"),customerReference:nullable(d,"customerReference"),packageCount:nullableNumber(d,"packageCount"),weightKg:weightInKg(d,"weightKg","weightUnit"),volumeCbm:nullableNumber(d,"volumeCbm"),chargeableWeightKg:weightInKg(d,"chargeableWeightKg","chargeableWeightUnit"),customsDocReference:nullable(d,"customsDocReference"),shipmentTerms:nullable(d,"shipmentTerms"),hbl:nullable(d,"hbl"),mbl:nullable(d,"mbl"),containerNumbers,serviceIds}).then(success=>{if(success&&!initial) clearJobFormDraft(draftOwner);});
   }
-  const form = <form ref={formRef} className="job-form" onChange={event=>{if((event.target as HTMLInputElement).type!=="checkbox") persistDraft(event.currentTarget);}} onSubmit={submit}>
+  const form = <form ref={formRef} className="job-form" onChange={event=>{
+    const target=event.target as HTMLInputElement|HTMLTextAreaElement;
+    if(target.name==="containerNumbers"){
+      const detected=parseContainerManifest(target.value).length;
+      setDetectedContainers(detected);
+      const countInput=event.currentTarget.elements.namedItem("count") as HTMLInputElement|null;
+      if(countInput&&detected) countInput.value=String(detected);
+    }
+    if(target.type!=="checkbox") persistDraft(event.currentTarget);
+  }} onSubmit={submit}>
     {!initial&&<div className="draft-notice" role="status"><span>{draftSavedAt?`Draft saved in this browser at ${new Date(draftSavedAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"Your entries will be saved automatically in this browser."}</span>{draftSavedAt&&<button type="button" onClick={discardDraft}>Discard draft</button>}</div>}
     <div className="auto-number"><span>Job reference</span><b>{initial?.jobNumber||"Created automatically"}</b><small>{initial?"Assigned automatically and cannot be changed.":"The next reference will be assigned when you save this job."}</small></div>
     <FormSection title="Customer and route" note="Billing party and movement"><div className="two"><Field label="Customer"><select name="customerId" required defaultValue={initial?.customerId}><option value="">Select customer</option>{data.customers.filter(c=>c.active||c.id===initial?.customerId).map(c=><option value={c.id} key={c.id}>{c.name} · {c.code}</option>)}</select></Field><Field label="Branch"><select name="branchId" required defaultValue={initial?.branchId||data.branches[0]?.id}>{data.branches.filter(b=>b.active||b.id===initial?.branchId).map(b=><option value={b.id} key={b.id}>{b.name}</option>)}</select></Field></div><div className="route-fields"><Field label="POL"><PortSelect name="pol" ports={data.ports} initial={initial?.polId}/></Field><Field label="Transshipment port"><PortSelect name="tp" ports={data.ports} initial={initial?.transshipmentPortId||""} optional/></Field><Field label="POD"><PortSelect name="pod" ports={data.ports} initial={initial?.podId}/></Field></div><div className="two"><Field label="Origin port"><input name="originPort" maxLength={160} defaultValue={initial?.originPort||""}/></Field><Field label="Place of delivery"><input name="placeOfDelivery" maxLength={200} defaultValue={initial?.placeOfDelivery||""}/></Field></div></FormSection>
     <FormSection title="Transport and references" note="Vessel, dates and documents"><div className="three"><Field label="Mode"><select name="mode" defaultValue={initial?.transportMode||"SEA"}>{["SEA","AIR","ROAD","MULTIMODAL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"DRAFT"}>{["DRAFT","OPEN","COMPLETED","READY_TO_INVOICE","CANCELLED"].map(v=><option value={v} key={v}>{label(v)}</option>)}</select></Field><Field label="Sailed date"><input name="sailedDate" type="date" defaultValue={initial?.sailedDate||""}/></Field></div><div className="two"><Field label="Vessel"><input name="vessel" maxLength={160} defaultValue={initial?.vessel||""}/></Field><Field label="Voyage"><input name="voyage" maxLength={80} defaultValue={initial?.voyage||""}/></Field><Field label="Customer reference"><input name="customerReference" maxLength={120} defaultValue={initial?.customerReference||""}/></Field><Field label="Sales person"><input name="salesPerson" maxLength={160} defaultValue={initial?.salesPerson||""}/></Field><Field label="HBL"><input name="hbl" maxLength={100} defaultValue={initial?.hbl||""}/></Field><Field label="MBL"><input name="mbl" maxLength={100} defaultValue={initial?.mbl||""}/></Field><Field label="Customs document reference"><input name="customsDocReference" maxLength={160} defaultValue={initial?.customsDocReference||""}/></Field><Field label="Terms of shipment"><input name="shipmentTerms" maxLength={80} placeholder="PREPAID" defaultValue={initial?.shipmentTerms||""}/></Field></div></FormSection>
     <FormSection title="Parties" note="Shipment parties shown on the invoice"><div className="two"><Field label="Shipper"><input name="shipper" maxLength={200} defaultValue={initial?.shipper||""}/></Field><Field label="Consignee"><input name="consignee" maxLength={200} defaultValue={initial?.consignee||""}/></Field><Field label="Notify name"><input name="notifyName" maxLength={200} defaultValue={initial?.notifyName||""}/></Field><Field label="Commodity"><input name="commodity" maxLength={300} defaultValue={initial?.commodity||""}/></Field></div></FormSection>
-    <FormSection title="Cargo and equipment" note="Package totals and container plan"><div className="three"><Field label="Package type / equipment"><select name="equipment" defaultValue={initial?.plannedContainerType||"20GP"}>{["20GP","20SD","40GP","40HC","45HC","LCL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Number of containers"><input name="count" type="number" min="1" max="999" defaultValue={initial?.plannedContainerCount||1}/></Field><Field label="No. of packages"><input name="packageCount" type="number" min="0" step="1" defaultValue={initial?.packageCount??""}/></Field><WeightField label="Weight" name="weightKg" unitName="weightUnit" defaultValue={initial?.weightKg}/><Field label="Volume (CBM)"><input name="volumeCbm" type="number" min="0" step="0.001" defaultValue={initial?.volumeCbm??""}/></Field><WeightField label="Chargeable weight" name="chargeableWeightKg" unitName="chargeableWeightUnit" defaultValue={initial?.chargeableWeightKg}/></div>{!initial&&<Field label="Container numbers"><textarea name="containerNumbers" rows={3} placeholder="MSCU1234567 — one per line or comma separated"/><small className="input-help">Optional. You can also add containers from the job page after saving.</small></Field>}{initial&&<p className="form-help">Actual container numbers are managed in the Containers section on the job page.</p>}</FormSection>
+    <FormSection title="Cargo and equipment" note="Package totals and container plan"><div className="three"><Field label="Package type / equipment"><select name="equipment" defaultValue={initial?.plannedContainerType||"20GP"}>{["20GP","20SD","40GP","40HC","45HC","LCL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Number of containers"><input name="count" type="number" min="1" max="999" defaultValue={initial?.plannedContainerCount||1}/></Field><Field label="No. of packages"><input name="packageCount" type="number" min="0" step="1" defaultValue={initial?.packageCount??""}/></Field><WeightField label="Weight" name="weightKg" unitName="weightUnit" defaultValue={initial?.weightKg}/><Field label="Volume (CBM)"><input name="volumeCbm" type="number" min="0" step="0.001" defaultValue={initial?.volumeCbm??""}/></Field><WeightField label="Chargeable weight" name="chargeableWeightKg" unitName="chargeableWeightUnit" defaultValue={initial?.chargeableWeightKg}/></div>{!initial&&<Field label="Container manifest"><textarea name="containerNumbers" rows={5} placeholder="DOLU2008497 / 20SD   CRXU3126290 / 20SD" onInput={event=>event.currentTarget.setCustomValidity("")}/><small className="input-help">{detectedContainers?`${detectedContainers} unique container${detectedContainers===1?"":"s"} detected. `:""}Paste numbers with spaces, lines, commas or equipment labels such as / 20SD. Equipment labels are ignored and the container count updates automatically.</small></Field>}{initial&&<p className="form-help">Actual container numbers are managed in the Containers section on the job page.</p>}</FormSection>
     <FormSection title="Services required" note="Select one or more services"><div className="service-picker-head"><div><b>Job services</b><small>Click a service card to select it. Charges are entered after saving the job.</small></div><span>{serviceIds.length} selected</span></div><div className="service-picker">{data.services.filter(s=>s.active||serviceIds.includes(s.id)).map(s=>{const selected=serviceIds.includes(s.id);return <button type="button" aria-pressed={selected} className={selected?"service-choice selected":"service-choice"} key={s.id} onClick={()=>toggleService(s.id,!selected)}><i>{selected?"✓":"+"}</i><span><b>{s.name}</b><small>{s.code} · Charged per {s.defaultUom}</small></span></button>})}</div></FormSection>
     {!serviceIds.length&&<p className="form-help validation-help">Select at least one service to continue.</p>}<FormButtons label={initial?"Update job":"Create job"} close={close} disabled={!serviceIds.length}/>
   </form>;
