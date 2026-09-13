@@ -1,5 +1,6 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import type { Charge, Customer, Invoice, JobDetail, JobSummary, MasterData, Port, SaveCustomer, SaveJob, ManagedUser, CreateManagedUser, UpdateManagedUser } from "@transwave/contracts";
 import { api } from "./api";
 import { useAuth } from "./auth";
@@ -8,11 +9,12 @@ import { clearJobFormDraft, readJobFormDraft, saveJobFormDraft } from "./job-for
 import "./invoice-flow.css";
 import "./job-editor.css";
 
-type Page = "Dashboard" | "Customers" | "Jobs" | "Invoices" | "Masters" | "Users";
+type NavigationPage = "Dashboard" | "Customers" | "Jobs" | "Invoices" | "Masters" | "Users";
+type Page = NavigationPage | "New Job";
 type Dialog = "customer" | "job" | "container" | "charge" | "invoice" | "port" | "service" | "user" | null;
 type AssignedService = JobDetail["services"][number];
 const money = new Intl.NumberFormat("en-AE", { style: "currency", currency: "AED" });
-const icons: Record<Page, string> = { Dashboard: "▦", Customers: "◎", Jobs: "▣", Invoices: "◫", Masters: "⚙", Users: "♙" };
+const icons: Record<NavigationPage, string> = { Dashboard: "▦", Customers: "◎", Jobs: "▣", Invoices: "◫", Masters: "⚙", Users: "♙" };
 const label = (value: string) => value.replaceAll("_", " ");
 const route = (job: JobSummary | JobDetail) => [job.polName, job.transshipmentPortName, job.podName].filter(Boolean).join(" → ");
 const message = (reason: unknown) => reason instanceof Error ? reason.message : "The operation could not be completed";
@@ -21,10 +23,16 @@ const nullableNumber = (data: FormData, name: string) => {
   const value = String(data.get(name) ?? "").trim();
   return value === "" ? null : Number(value);
 };
+const weightInKg = (data: FormData, name: string, unitName: string) => {
+  const value = nullableNumber(data, name);
+  return value === null ? null : value * (String(data.get(unitName)) === "MT" ? 1000 : 1);
+};
 
 export function Workspace() {
+  const router = useRouter();
+  const pathname = usePathname();
   const { session, user, signOut } = useAuth();
-  const [page, setPage] = useState<Page>("Dashboard");
+  const [page, setPage] = useState<Page>(pathname === "/jobs/new" ? "New Job" : "Dashboard");
   const [masters, setMasters] = useState<MasterData | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -55,31 +63,57 @@ export function Workspace() {
     finally { setBusy(false); }
   }, [session, user]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (pathname === "/jobs/new") setPage("New Job");
+    else setPage(current => current === "New Job" ? "Jobs" : current);
+  }, [pathname]);
 
   async function openJob(id: string) { if (!session) return; setBusy(true); try { setSelectedJob(await api.job(session, id)); setPage("Jobs"); } catch (reason) { setError(message(reason)); } finally { setBusy(false); } }
   async function openInvoice(id: string) { if (!session) return; setBusy(true); try { setSelectedInvoice(await api.invoice(session, id)); setPage("Invoices"); } catch (reason) { setError(message(reason)); } finally { setBusy(false); } }
   async function act<T>(work: () => Promise<T>, after?: (value: T) => void): Promise<boolean> { setBusy(true); setError(""); try { const value = await work(); after?.(value); setDialog(null); await load(); return true; } catch (reason) { setError(message(reason)); setBusy(false); return false; } }
-  const nav = (next: Page) => { setPage(next); setDialog(null); setError(""); };
+  const nav = (next: Page) => { router.push(next === "New Job" ? "/jobs/new" : "/"); setPage(next); setDialog(null); setError(""); };
+  const openNewJob = () => { setSelectedJob(null); setDialog(null); setError(""); setPage("New Job"); router.push("/jobs/new"); };
+  const closeJobPage = () => { setPage("Jobs"); router.push("/"); };
   if (!session || !user || !masters) return <div className="center-state">{error || "Loading company data…"}</div>;
   const unbilled = selectedJob?.charges.filter(charge => !charge.invoiceId) ?? [];
 
-  const pages = (Object.keys(icons) as Page[]).filter(item => item !== "Users" || ["OWNER","ADMIN"].includes(user.role));
-  return <main className="app-shell"><aside className="side"><div className="logo"><img className="brand-logo" src="/images/tsw-logo.png" alt="TransWave Shipping and Logistics"/></div><p className="section-label">OPERATIONS</p>{pages.map(item => <button key={item} className={page === item ? "menu active" : "menu"} onClick={() => nav(item)}><span>{icons[item]}</span>{item}</button>)}<div className="user"><i>{user.email.slice(0,2).toUpperCase()}</i><div><b>{user.email}</b><small>{label(user.role)}</small></div><button aria-label="Sign out" title="Sign out" onClick={() => void signOut()}>↪</button></div></aside>
-    <section className="workspace"><header><div><p className="kicker">{user.companyName}</p><h1>{page}</h1></div><div className="header-actions"><button className="soft" onClick={() => void load()}>Refresh</button>{page === "Customers" && canManageOperations && <button className="button" onClick={() => { setEditingCustomer(null); setDialog("customer"); }}>+ New customer</button>}{page === "Jobs" && canManageOperations && <button className="button" onClick={() => { setSelectedJob(null); setDialog("job"); }}>+ New job</button>}</div></header>{error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>×</button></div>}{busy && <div className="progress"/>}
+  const pages = (Object.keys(icons) as NavigationPage[]).filter(item => item !== "Users" || ["OWNER","ADMIN"].includes(user.role));
+  return <main className="app-shell"><aside className="side"><div className="logo"><img className="brand-logo" src="/images/tsw-logo.png" alt="TransWave Shipping and Logistics"/></div><p className="section-label">OPERATIONS</p>{pages.map(item => <button key={item} className={page === item || (page === "New Job" && item === "Jobs") ? "menu active" : "menu"} onClick={() => nav(item)}><span>{icons[item]}</span>{item}</button>)}<div className="user"><i>{user.email.slice(0,2).toUpperCase()}</i><div><b>{user.email}</b><small>{label(user.role)}</small></div><button aria-label="Sign out" title="Sign out" onClick={() => void signOut()}>↪</button></div></aside>
+    <section className="workspace"><header><div><p className="kicker">{user.companyName}</p><h1>{page === "New Job" ? "Create job" : page}</h1></div><div className="header-actions">{page === "New Job" ? <button className="soft" onClick={closeJobPage}>← Back to jobs</button> : <button className="soft" onClick={() => void load()}>Refresh</button>}{page === "Customers" && canManageOperations && <button className="button" onClick={() => { setEditingCustomer(null); setDialog("customer"); }}>+ New customer</button>}{page === "Jobs" && canManageOperations && <button className="button" onClick={openNewJob}>+ New job</button>}</div></header>{error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>×</button></div>}{busy && <div className="progress"/>}
       {page === "Dashboard" && <Dashboard jobs={jobs} invoices={invoices} onJob={openJob} onNavigate={nav}/>}
       {page === "Customers" && <Customers customers={masters.customers} canEdit={canManageOperations} onEdit={value => { setEditingCustomer(value); setDialog("customer"); }}/>}
-      {page === "Jobs" && <Jobs jobs={jobs} selected={selectedJob} canEdit={canManageOperations} canBill={canManageBilling} onOpen={openJob} onEdit={() => setDialog("job")} onContainer={() => setDialog("container")} onRemoveContainer={id => void act(() => api.removeContainer(session,selectedJob!.id,id), setSelectedJob)} onCharge={(service,charge) => { setChargeService({service,charge}); setDialog("charge"); }} onRemoveCharge={id => void act(() => api.removeCharge(session,selectedJob!.id,id),setSelectedJob)} onInvoice={() => setDialog("invoice")} onOpenInvoice={openInvoice}/>}
+      {page === "Jobs" && <Jobs
+        jobs={jobs}
+        selected={selectedJob}
+        canEdit={canManageOperations}
+        canBill={canManageBilling}
+        onOpen={openJob}
+        onEdit={() => setDialog("job")}
+        onContainer={() => setDialog("container")}
+        onRemoveContainer={id => void act(() => api.removeContainer(session,selectedJob!.id,id), setSelectedJob)}
+        onCharge={(service,charge) => { setChargeService({service,charge}); setDialog("charge"); }}
+        onRemoveCharge={id => void act(() => api.removeCharge(session,selectedJob!.id,id),setSelectedJob)}
+        onInvoice={() => setDialog("invoice")}
+        onOpenInvoice={openInvoice}
+      />}
+      {page === "New Job" && canManageOperations && <JobEditor
+        initial={null}
+        data={masters}
+        draftOwner={user.userId}
+        close={closeJobPage}
+        save={input => act(() => api.createJob(session,input),value => {setSelectedJob(value);setPage("Jobs");router.push("/");})}
+      />}
       {page === "Invoices" && <Invoices invoices={invoices} selected={selectedInvoice} canIssue={canManageBilling} onOpen={openInvoice} onIssue={() => selectedInvoice && void act(() => api.issueInvoice(session,selectedInvoice.id),setSelectedInvoice)}/>}
       {page === "Masters" && <Masters data={masters} canEdit={canManageSetup} onNewPort={() => {setEditingPort(null);setDialog("port");}} onEditPort={value => {setEditingPort(value);setDialog("port");}} onTogglePort={value => void act(() => api.updatePort(session,value.id,{active:!value.active}))} onNewService={() => {setEditingService(null);setDialog("service");}} onEditService={value => {setEditingService(value);setDialog("service");}} onToggleService={value => void act(() => api.updateService(session,value.id,{active:!value.active}))}/>}
       {page === "Users" && <Users users={users} currentUserId={user.userId} canManageOwners={user.role==="OWNER"} onNew={() => {setEditingUser(null);setDialog("user");}} onEdit={value => {setEditingUser(value);setDialog("user");}} onToggle={value => void act(() => api.updateUser(session,value.id,{active:!value.active}))}/>}
     </section>
     {dialog === "customer" && <CustomerDialog initial={editingCustomer} currencies={masters.currencies} close={() => setDialog(null)} save={input => void act(() => editingCustomer ? api.updateCustomer(session,editingCustomer.id,input) : api.createCustomer(session,input))}/>}
-    {dialog === "job" && <JobDialog
+    {dialog === "job" && selectedJob && <JobEditor
       initial={selectedJob}
       data={masters}
       draftOwner={user.userId}
       close={() => setDialog(null)}
-      save={input => act(() => selectedJob ? api.updateJob(session,selectedJob.id,input) : api.createJob(session,input),value => {setSelectedJob(value);setPage("Jobs");})}
+      save={input => act(() => api.updateJob(session,selectedJob.id,input),value => {setSelectedJob(value);setPage("Jobs");})}
     />}
     {dialog === "container" && selectedJob && <ContainerDialog close={() => setDialog(null)} save={input => void act(() => api.addContainer(session,selectedJob.id,input),setSelectedJob)}/>}
     {dialog === "charge" && selectedJob && chargeService && <ChargeDialog item={chargeService} taxes={masters.taxRates} close={() => setDialog(null)} save={input => void act(() => api.saveCharge(session,selectedJob.id,input),setSelectedJob)}/>}
@@ -106,7 +140,7 @@ function Users({users,currentUserId,canManageOwners,onNew,onEdit,onToggle}:{user
 
 function CustomerDialog({initial,currencies,close,save}:{initial:Customer|null;currencies:string[];close():void;save(v:SaveCustomer):void}) { return <Modal title={initial?"Edit customer":"Create customer"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),billingAddress:nullable(d,"address"),defaultCurrency:String(d.get("currency")),paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Customer ID</span><b>{initial?.code||"Created automatically"}</b><small>{initial?"This permanent customer ID cannot be changed.":"The next CST/YYYY/00000 reference is assigned when you save."}</small></div><Field label="Company name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="VAT No."><input name="trn" maxLength={32} defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Billing address"><input name="address" defaultValue={initial?.billingAddress||""}/></Field><div className="two"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Currency"><select name="currency" defaultValue={initial?.defaultCurrency||"AED"}>{currencies.map(v=><option key={v}>{v}</option>)}</select></Field></div><Field label="Payment terms (days)"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field><FormButtons label="Save customer" close={close}/></form></Modal>; }
 
-function JobDialog({initial,data,draftOwner,close,save}:{initial:JobDetail|null;data:MasterData;draftOwner:string;close():void;save(v:SaveJob):Promise<boolean>}) {
+function JobEditor({initial,data,draftOwner,close,save}:{initial:JobDetail|null;data:MasterData;draftOwner:string;close():void;save(v:SaveJob):Promise<boolean>}) {
   const formRef=useRef<HTMLFormElement>(null);
   const [serviceIds,setServiceIds]=useState(initial?.services.map(s=>s.id)??[]);
   const [draftSavedAt,setDraftSavedAt]=useState<string|null>(null);
@@ -130,8 +164,8 @@ function JobDialog({initial,data,draftOwner,close,save}:{initial:JobDetail|null;
     setDraftSavedAt(saveJobFormDraft(draftOwner,values,nextServiceIds).savedAt);
   }
 
-  function toggleService(id:string){
-    const next=serviceIds.includes(id)?serviceIds.filter(item=>item!==id):[...serviceIds,id];
+  function toggleService(id:string,checked:boolean){
+    const next=checked?[...new Set([...serviceIds,id])]:serviceIds.filter(item=>item!==id);
     setServiceIds(next);
     if(formRef.current) persistDraft(formRef.current,next);
   }
@@ -146,18 +180,19 @@ function JobDialog({initial,data,draftOwner,close,save}:{initial:JobDetail|null;
   function submit(event:FormEvent<HTMLFormElement>){
     event.preventDefault(); const d=new FormData(event.currentTarget);
     const containerNumbers=String(d.get("containerNumbers")||"").split(/[\n,]+/).map(value=>value.trim().toUpperCase()).filter(Boolean);
-    void save({customerId:String(d.get("customerId")),branchId:String(d.get("branchId")),transportMode:String(d.get("mode")) as SaveJob["transportMode"],status:String(d.get("status")) as SaveJob["status"],plannedContainerType:String(d.get("equipment")),plannedContainerCount:Number(d.get("count")),polId:String(d.get("pol")),podId:String(d.get("pod")),transshipmentPortId:nullable(d,"tp"),vessel:nullable(d,"vessel"),voyage:nullable(d,"voyage"),sailedDate:nullable(d,"sailedDate"),originPort:nullable(d,"originPort"),placeOfDelivery:nullable(d,"placeOfDelivery"),shipper:nullable(d,"shipper"),consignee:nullable(d,"consignee"),notifyName:nullable(d,"notifyName"),commodity:nullable(d,"commodity"),salesPerson:nullable(d,"salesPerson"),customerReference:nullable(d,"customerReference"),packageCount:nullableNumber(d,"packageCount"),weightKg:nullableNumber(d,"weightKg"),volumeCbm:nullableNumber(d,"volumeCbm"),chargeableWeightKg:nullableNumber(d,"chargeableWeightKg"),customsDocReference:nullable(d,"customsDocReference"),shipmentTerms:nullable(d,"shipmentTerms"),hbl:nullable(d,"hbl"),mbl:nullable(d,"mbl"),containerNumbers,serviceIds}).then(success=>{if(success&&!initial) clearJobFormDraft(draftOwner);});
+    void save({customerId:String(d.get("customerId")),branchId:String(d.get("branchId")),transportMode:String(d.get("mode")) as SaveJob["transportMode"],status:String(d.get("status")) as SaveJob["status"],plannedContainerType:String(d.get("equipment")),plannedContainerCount:Number(d.get("count")),polId:String(d.get("pol")),podId:String(d.get("pod")),transshipmentPortId:nullable(d,"tp"),vessel:nullable(d,"vessel"),voyage:nullable(d,"voyage"),sailedDate:nullable(d,"sailedDate"),originPort:nullable(d,"originPort"),placeOfDelivery:nullable(d,"placeOfDelivery"),shipper:nullable(d,"shipper"),consignee:nullable(d,"consignee"),notifyName:nullable(d,"notifyName"),commodity:nullable(d,"commodity"),salesPerson:nullable(d,"salesPerson"),customerReference:nullable(d,"customerReference"),packageCount:nullableNumber(d,"packageCount"),weightKg:weightInKg(d,"weightKg","weightUnit"),volumeCbm:nullableNumber(d,"volumeCbm"),chargeableWeightKg:weightInKg(d,"chargeableWeightKg","chargeableWeightUnit"),customsDocReference:nullable(d,"customsDocReference"),shipmentTerms:nullable(d,"shipmentTerms"),hbl:nullable(d,"hbl"),mbl:nullable(d,"mbl"),containerNumbers,serviceIds}).then(success=>{if(success&&!initial) clearJobFormDraft(draftOwner);});
   }
-  return <Modal title={initial?`Edit ${initial.jobNumber}`:"Create logistics job"} wide close={close}><form ref={formRef} className="job-form" onChange={event=>persistDraft(event.currentTarget)} onSubmit={submit}>
+  const form = <form ref={formRef} className="job-form" onChange={event=>{if((event.target as HTMLInputElement).type!=="checkbox") persistDraft(event.currentTarget);}} onSubmit={submit}>
     {!initial&&<div className="draft-notice" role="status"><span>{draftSavedAt?`Draft saved in this browser at ${new Date(draftSavedAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"Your entries will be saved automatically in this browser."}</span>{draftSavedAt&&<button type="button" onClick={discardDraft}>Discard draft</button>}</div>}
     <div className="auto-number"><span>Job reference</span><b>{initial?.jobNumber||"Created automatically"}</b><small>{initial?"Assigned automatically and cannot be changed.":"The next reference will be assigned when you save this job."}</small></div>
     <FormSection title="Customer and route" note="Billing party and movement"><div className="two"><Field label="Customer"><select name="customerId" required defaultValue={initial?.customerId}><option value="">Select customer</option>{data.customers.filter(c=>c.active||c.id===initial?.customerId).map(c=><option value={c.id} key={c.id}>{c.name} · {c.code}</option>)}</select></Field><Field label="Branch"><select name="branchId" required defaultValue={initial?.branchId||data.branches[0]?.id}>{data.branches.filter(b=>b.active||b.id===initial?.branchId).map(b=><option value={b.id} key={b.id}>{b.name}</option>)}</select></Field></div><div className="route-fields"><Field label="POL"><PortSelect name="pol" ports={data.ports} initial={initial?.polId}/></Field><Field label="Transshipment port"><PortSelect name="tp" ports={data.ports} initial={initial?.transshipmentPortId||""} optional/></Field><Field label="POD"><PortSelect name="pod" ports={data.ports} initial={initial?.podId}/></Field></div><div className="two"><Field label="Origin port"><input name="originPort" maxLength={160} defaultValue={initial?.originPort||""}/></Field><Field label="Place of delivery"><input name="placeOfDelivery" maxLength={200} defaultValue={initial?.placeOfDelivery||""}/></Field></div></FormSection>
     <FormSection title="Transport and references" note="Vessel, dates and documents"><div className="three"><Field label="Mode"><select name="mode" defaultValue={initial?.transportMode||"SEA"}>{["SEA","AIR","ROAD","MULTIMODAL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"DRAFT"}>{["DRAFT","OPEN","COMPLETED","READY_TO_INVOICE","CANCELLED"].map(v=><option value={v} key={v}>{label(v)}</option>)}</select></Field><Field label="Sailed date"><input name="sailedDate" type="date" defaultValue={initial?.sailedDate||""}/></Field></div><div className="two"><Field label="Vessel"><input name="vessel" maxLength={160} defaultValue={initial?.vessel||""}/></Field><Field label="Voyage"><input name="voyage" maxLength={80} defaultValue={initial?.voyage||""}/></Field><Field label="Customer reference"><input name="customerReference" maxLength={120} defaultValue={initial?.customerReference||""}/></Field><Field label="Sales person"><input name="salesPerson" maxLength={160} defaultValue={initial?.salesPerson||""}/></Field><Field label="HBL"><input name="hbl" maxLength={100} defaultValue={initial?.hbl||""}/></Field><Field label="MBL"><input name="mbl" maxLength={100} defaultValue={initial?.mbl||""}/></Field><Field label="Customs document reference"><input name="customsDocReference" maxLength={160} defaultValue={initial?.customsDocReference||""}/></Field><Field label="Terms of shipment"><input name="shipmentTerms" maxLength={80} placeholder="PREPAID" defaultValue={initial?.shipmentTerms||""}/></Field></div></FormSection>
     <FormSection title="Parties" note="Shipment parties shown on the invoice"><div className="two"><Field label="Shipper"><input name="shipper" maxLength={200} defaultValue={initial?.shipper||""}/></Field><Field label="Consignee"><input name="consignee" maxLength={200} defaultValue={initial?.consignee||""}/></Field><Field label="Notify name"><input name="notifyName" maxLength={200} defaultValue={initial?.notifyName||""}/></Field><Field label="Commodity"><input name="commodity" maxLength={300} defaultValue={initial?.commodity||""}/></Field></div></FormSection>
-    <FormSection title="Cargo and equipment" note="Package totals and container plan"><div className="three"><Field label="Package type / equipment"><select name="equipment" defaultValue={initial?.plannedContainerType||"20GP"}>{["20GP","20SD","40GP","40HC","45HC","LCL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Number of containers"><input name="count" type="number" min="1" max="999" defaultValue={initial?.plannedContainerCount||1}/></Field><Field label="No. of packages"><input name="packageCount" type="number" min="0" step="1" defaultValue={initial?.packageCount??""}/></Field><Field label="Weight (KGS)"><input name="weightKg" type="number" min="0" step="0.001" defaultValue={initial?.weightKg??""}/></Field><Field label="Volume (CBM)"><input name="volumeCbm" type="number" min="0" step="0.001" defaultValue={initial?.volumeCbm??""}/></Field><Field label="Chargeable weight (KGS)"><input name="chargeableWeightKg" type="number" min="0" step="0.001" defaultValue={initial?.chargeableWeightKg??""}/></Field></div>{!initial&&<Field label="Container numbers"><textarea name="containerNumbers" rows={3} placeholder="MSCU1234567 — one per line or comma separated"/><small className="input-help">Optional. You can also add containers from the job page after saving.</small></Field>}{initial&&<p className="form-help">Actual container numbers are managed in the Containers section on the job page.</p>}</FormSection>
-    <FormSection title="Services required" note="Each service can be selected once"><div className="service-picker-head"><div><b>Job services</b><small>Charges are entered separately after the job is saved.</small></div><span>{serviceIds.length} selected</span></div><div className="service-picker">{data.services.filter(s=>s.active||serviceIds.includes(s.id)).map(s=>{const selected=serviceIds.includes(s.id);return <label className={selected?"service-choice selected":"service-choice"} key={s.id}><input type="checkbox" checked={selected} onChange={()=>toggleService(s.id)}/><i>{selected?"✓":"+"}</i><span><b>{s.name}</b><small>{s.code} · Charged per {s.defaultUom}</small></span></label>})}</div></FormSection>
+    <FormSection title="Cargo and equipment" note="Package totals and container plan"><div className="three"><Field label="Package type / equipment"><select name="equipment" defaultValue={initial?.plannedContainerType||"20GP"}>{["20GP","20SD","40GP","40HC","45HC","LCL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Number of containers"><input name="count" type="number" min="1" max="999" defaultValue={initial?.plannedContainerCount||1}/></Field><Field label="No. of packages"><input name="packageCount" type="number" min="0" step="1" defaultValue={initial?.packageCount??""}/></Field><WeightField label="Weight" name="weightKg" unitName="weightUnit" defaultValue={initial?.weightKg}/><Field label="Volume (CBM)"><input name="volumeCbm" type="number" min="0" step="0.001" defaultValue={initial?.volumeCbm??""}/></Field><WeightField label="Chargeable weight" name="chargeableWeightKg" unitName="chargeableWeightUnit" defaultValue={initial?.chargeableWeightKg}/></div>{!initial&&<Field label="Container numbers"><textarea name="containerNumbers" rows={3} placeholder="MSCU1234567 — one per line or comma separated"/><small className="input-help">Optional. You can also add containers from the job page after saving.</small></Field>}{initial&&<p className="form-help">Actual container numbers are managed in the Containers section on the job page.</p>}</FormSection>
+    <FormSection title="Services required" note="Select one or more services"><div className="service-picker-head"><div><b>Job services</b><small>Click a service card to select it. Charges are entered after saving the job.</small></div><span>{serviceIds.length} selected</span></div><div className="service-picker">{data.services.filter(s=>s.active||serviceIds.includes(s.id)).map(s=>{const selected=serviceIds.includes(s.id);return <button type="button" aria-pressed={selected} className={selected?"service-choice selected":"service-choice"} key={s.id} onClick={()=>toggleService(s.id,!selected)}><i>{selected?"✓":"+"}</i><span><b>{s.name}</b><small>{s.code} · Charged per {s.defaultUom}</small></span></button>})}</div></FormSection>
     {!serviceIds.length&&<p className="form-help validation-help">Select at least one service to continue.</p>}<FormButtons label={initial?"Update job":"Create job"} close={close} disabled={!serviceIds.length}/>
-  </form></Modal>;
+  </form>;
+  return initial ? <Modal title={`Edit ${initial.jobNumber}`} wide close={close}>{form}</Modal> : <section className="panel job-form-page"><div className="job-page-intro"><div><h2>New logistics job</h2><p>Complete the shipment details below. Your browser draft remains available if the page refreshes.</p></div><span className="tag amber">DRAFT</span></div>{form}</section>;
 }
 
 function ContainerDialog({close,save}:{close():void;save(v:{containerNumber:string;size:"20"|"40"|"45";containerType:string;sealNumber:string|null}):void}) { return <Modal title="Add actual container" close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({containerNumber:String(d.get("number")).toUpperCase(),size:String(d.get("size")) as "20"|"40"|"45",containerType:String(d.get("type")),sealNumber:nullable(d,"seal")})}}><Field label="Container number"><input name="number" required pattern="[A-Za-z]{4}[0-9]{7}" placeholder="MSCU1234567"/></Field><div className="two"><Field label="Size"><select name="size"><option>20</option><option>40</option><option>45</option></select></Field><Field label="Type"><select name="type"><option>GP</option><option>HC</option><option>RF</option><option>OT</option><option>FR</option></select></Field></div><Field label="Seal number"><input name="seal"/></Field><FormButtons label="Add container" close={close}/></form></Modal>; }
@@ -192,6 +227,7 @@ function Tag({text}:{text:string}) { const tone=["ACTIVE","ISSUED","COMPLETED"].
 function Detail({label:heading,value}:{label:string;value:string}) { return <div className="detail"><small>{heading}</small><b>{value}</b></div>; }
 function Modal({title,wide,close,children}:{title:string;wide?:boolean;close():void;children:React.ReactNode}) { return <div className="overlay"><section className={`modal ${wide?"wide-modal":""}`} role="dialog" aria-modal="true"><div className="panel-head"><div><p className="kicker">TRANSWAVE OPERATIONS</p><h2>{title}</h2></div><button className="x" aria-label="Close" onClick={close}>×</button></div>{children}</section></div>; }
 function Field({label:heading,children}:{label:string;children:React.ReactNode}) { return <label>{heading}{children}</label>; }
+function WeightField({label:heading,name,unitName,defaultValue}:{label:string;name:string;unitName:string;defaultValue?:number|null}) { return <Field label={heading}><div className="measurement-input"><input name={name} type="number" min="0" step="0.001" defaultValue={defaultValue??""}/><select name={unitName} defaultValue="KG" aria-label={`${heading} unit`}><option value="KG">KG</option><option value="MT">MT</option></select></div><small className="input-help">Choose kilograms or metric tonnes.</small></Field>; }
 function FormSection({title,note,children}:{title:string;note:string;children:React.ReactNode}) { return <section className="form-section"><div className="form-section-head"><h3>{title}</h3><small>{note}</small></div>{children}</section>; }
 function FormButtons({label:heading,close,disabled}:{label:string;close():void;disabled?:boolean}) { return <div className="form-actions"><button className="soft" type="button" onClick={close}>Cancel</button><button className="button" disabled={disabled}>{heading}</button></div>; }
 function PortSelect({name,ports,initial,optional}:{name:string;ports:Port[];initial?:string;optional?:boolean}) { return <select name={name} required={!optional} defaultValue={initial}><option value="">{optional?"Direct shipment":"Select port"}</option>{ports.filter(p=>p.active||p.id===initial).map(p=><option value={p.id} key={p.id}>{p.name}{p.unLocode?` (${p.unLocode})`:""}</option>)}</select>; }

@@ -19,15 +19,19 @@ body:has(.overlay){overflow:hidden}
 .container-edit-row{display:grid;grid-template-columns:2fr 1fr auto;gap:12px;align-items:center}
 .edit-error{color:#b42318}
 .job-form{display:grid;gap:14px}
+.job-form-page{width:min(1100px,100%);margin:0 auto}
+.job-page-intro{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-bottom:18px;margin-bottom:18px;border-bottom:1px solid var(--line)}
+.job-page-intro h2,.job-page-intro p{margin:0}.job-page-intro p{margin-top:5px;color:var(--muted)}
 .draft-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #cfe8ec;border-radius:9px;background:#f2f9fa;color:var(--muted);font-size:12px}
 .draft-notice button{border:0;padding:0;background:transparent;color:#b42318;font:inherit;font-weight:700;cursor:pointer;white-space:nowrap}
 .form-section{display:grid;gap:12px;border:1px solid var(--line);border-radius:12px;padding:16px;background:#fbfdfe}
 .form-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;padding-bottom:9px;border-bottom:1px solid var(--line)}
 .form-section-head h3{margin:0;font-size:16px}.form-section-head small{color:var(--muted);text-align:right}
 .form-section textarea{width:100%;resize:vertical}
+.measurement-input{display:grid;grid-template-columns:minmax(0,1fr) 76px;gap:8px}.measurement-input input,.measurement-input select{margin-top:7px}.measurement-input select{font-weight:700}
 .shipment-details{grid-template-columns:repeat(4,minmax(0,1fr))}
 .shipment-details .detail{min-width:0;overflow:hidden}
 .shipment-details .detail b{display:block;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.35}
 @media(max-width:700px){.route-fields,.container-edit-row{grid-template-columns:1fr}.job-editor{padding:18px}}
 @media(max-width:900px){.shipment-details{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:600px){.shipment-details{grid-template-columns:1fr}.form-section{padding:12px}.form-section-head{display:block}.form-section-head small{display:block;text-align:left;margin-top:3px}.draft-notice{align-items:flex-start;flex-direction:column}}
+@media(max-width:600px){.shipment-details{grid-template-columns:1fr}.form-section{padding:12px}.form-section-head{display:block}.form-section-head small{display:block;text-align:left;margin-top:3px}.draft-notice{align-items:flex-start;flex-direction:column}.job-page-intro{align-items:flex-start}.job-form-page{padding:14px}}
