@@ -1,9 +1,10 @@
 "use client";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { Charge, Customer, Invoice, JobDetail, JobSummary, MasterData, Port, SaveCustomer, SaveJob, ManagedUser, CreateManagedUser, UpdateManagedUser } from "@transwave/contracts";
 import { api } from "./api";
 import { useAuth } from "./auth";
 import { invoicePrintTitle, printInvoice } from "./print-invoice";
+import { clearJobFormDraft, readJobFormDraft, saveJobFormDraft } from "./job-form-draft";
 import "./invoice-flow.css";
 import "./job-editor.css";
 
@@ -57,7 +58,7 @@ export function Workspace() {
 
   async function openJob(id: string) { if (!session) return; setBusy(true); try { setSelectedJob(await api.job(session, id)); setPage("Jobs"); } catch (reason) { setError(message(reason)); } finally { setBusy(false); } }
   async function openInvoice(id: string) { if (!session) return; setBusy(true); try { setSelectedInvoice(await api.invoice(session, id)); setPage("Invoices"); } catch (reason) { setError(message(reason)); } finally { setBusy(false); } }
-  async function act<T>(work: () => Promise<T>, after?: (value: T) => void) { setBusy(true); setError(""); try { const value = await work(); after?.(value); setDialog(null); await load(); } catch (reason) { setError(message(reason)); setBusy(false); } }
+  async function act<T>(work: () => Promise<T>, after?: (value: T) => void): Promise<boolean> { setBusy(true); setError(""); try { const value = await work(); after?.(value); setDialog(null); await load(); return true; } catch (reason) { setError(message(reason)); setBusy(false); return false; } }
   const nav = (next: Page) => { setPage(next); setDialog(null); setError(""); };
   if (!session || !user || !masters) return <div className="center-state">{error || "Loading company data…"}</div>;
   const unbilled = selectedJob?.charges.filter(charge => !charge.invoiceId) ?? [];
@@ -73,7 +74,13 @@ export function Workspace() {
       {page === "Users" && <Users users={users} currentUserId={user.userId} canManageOwners={user.role==="OWNER"} onNew={() => {setEditingUser(null);setDialog("user");}} onEdit={value => {setEditingUser(value);setDialog("user");}} onToggle={value => void act(() => api.updateUser(session,value.id,{active:!value.active}))}/>}
     </section>
     {dialog === "customer" && <CustomerDialog initial={editingCustomer} currencies={masters.currencies} close={() => setDialog(null)} save={input => void act(() => editingCustomer ? api.updateCustomer(session,editingCustomer.id,input) : api.createCustomer(session,input))}/>}
-    {dialog === "job" && <JobDialog initial={selectedJob} data={masters} close={() => setDialog(null)} save={input => void act(() => selectedJob ? api.updateJob(session,selectedJob.id,input) : api.createJob(session,input),value => {setSelectedJob(value);setPage("Jobs");})}/>}
+    {dialog === "job" && <JobDialog
+      initial={selectedJob}
+      data={masters}
+      draftOwner={user.userId}
+      close={() => setDialog(null)}
+      save={input => act(() => selectedJob ? api.updateJob(session,selectedJob.id,input) : api.createJob(session,input),value => {setSelectedJob(value);setPage("Jobs");})}
+    />}
     {dialog === "container" && selectedJob && <ContainerDialog close={() => setDialog(null)} save={input => void act(() => api.addContainer(session,selectedJob.id,input),setSelectedJob)}/>}
     {dialog === "charge" && selectedJob && chargeService && <ChargeDialog item={chargeService} taxes={masters.taxRates} close={() => setDialog(null)} save={input => void act(() => api.saveCharge(session,selectedJob.id,input),setSelectedJob)}/>}
     {dialog === "invoice" && selectedJob && <InvoiceDialog charges={unbilled} close={() => setDialog(null)} save={ids => void act(() => api.createDraft(session,selectedJob.id,ids),value => {setSelectedInvoice(value);setPage("Invoices");})}/>}
@@ -99,20 +106,56 @@ function Users({users,currentUserId,canManageOwners,onNew,onEdit,onToggle}:{user
 
 function CustomerDialog({initial,currencies,close,save}:{initial:Customer|null;currencies:string[];close():void;save(v:SaveCustomer):void}) { return <Modal title={initial?"Edit customer":"Create customer"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),billingAddress:nullable(d,"address"),defaultCurrency:String(d.get("currency")),paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Customer ID</span><b>{initial?.code||"Created automatically"}</b><small>{initial?"This permanent customer ID cannot be changed.":"The next CST/YYYY/00000 reference is assigned when you save."}</small></div><Field label="Company name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="VAT No."><input name="trn" maxLength={32} defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Billing address"><input name="address" defaultValue={initial?.billingAddress||""}/></Field><div className="two"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Currency"><select name="currency" defaultValue={initial?.defaultCurrency||"AED"}>{currencies.map(v=><option key={v}>{v}</option>)}</select></Field></div><Field label="Payment terms (days)"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field><FormButtons label="Save customer" close={close}/></form></Modal>; }
 
-function JobDialog({initial,data,close,save}:{initial:JobDetail|null;data:MasterData;close():void;save(v:SaveJob):void}) {
+function JobDialog({initial,data,draftOwner,close,save}:{initial:JobDetail|null;data:MasterData;draftOwner:string;close():void;save(v:SaveJob):Promise<boolean>}) {
+  const formRef=useRef<HTMLFormElement>(null);
   const [serviceIds,setServiceIds]=useState(initial?.services.map(s=>s.id)??[]);
+  const [draftSavedAt,setDraftSavedAt]=useState<string|null>(null);
+
+  useEffect(()=>{
+    if(initial||!formRef.current) return;
+    const draft=readJobFormDraft(draftOwner);
+    if(!draft) return;
+    for(const [name,value] of Object.entries(draft.values)){
+      const control=formRef.current.elements.namedItem(name);
+      if(control&&"value" in control) control.value=value;
+    }
+    const availableServices=new Set(data.services.map(service=>service.id));
+    setServiceIds(draft.serviceIds.filter(id=>availableServices.has(id)));
+    setDraftSavedAt(draft.savedAt);
+  },[data.services,draftOwner,initial]);
+
+  function persistDraft(form:HTMLFormElement,nextServiceIds=serviceIds){
+    if(initial) return;
+    const values=Object.fromEntries(Array.from(new FormData(form).entries()).flatMap(([name,value])=>typeof value==="string"?[[name,value]]:[]));
+    setDraftSavedAt(saveJobFormDraft(draftOwner,values,nextServiceIds).savedAt);
+  }
+
+  function toggleService(id:string){
+    const next=serviceIds.includes(id)?serviceIds.filter(item=>item!==id):[...serviceIds,id];
+    setServiceIds(next);
+    if(formRef.current) persistDraft(formRef.current,next);
+  }
+
+  function discardDraft(){
+    clearJobFormDraft(draftOwner);
+    formRef.current?.reset();
+    setServiceIds([]);
+    setDraftSavedAt(null);
+  }
+
   function submit(event:FormEvent<HTMLFormElement>){
     event.preventDefault(); const d=new FormData(event.currentTarget);
     const containerNumbers=String(d.get("containerNumbers")||"").split(/[\n,]+/).map(value=>value.trim().toUpperCase()).filter(Boolean);
-    save({customerId:String(d.get("customerId")),branchId:String(d.get("branchId")),transportMode:String(d.get("mode")) as SaveJob["transportMode"],status:String(d.get("status")) as SaveJob["status"],plannedContainerType:String(d.get("equipment")),plannedContainerCount:Number(d.get("count")),polId:String(d.get("pol")),podId:String(d.get("pod")),transshipmentPortId:nullable(d,"tp"),vessel:nullable(d,"vessel"),voyage:nullable(d,"voyage"),sailedDate:nullable(d,"sailedDate"),originPort:nullable(d,"originPort"),placeOfDelivery:nullable(d,"placeOfDelivery"),shipper:nullable(d,"shipper"),consignee:nullable(d,"consignee"),notifyName:nullable(d,"notifyName"),commodity:nullable(d,"commodity"),salesPerson:nullable(d,"salesPerson"),customerReference:nullable(d,"customerReference"),packageCount:nullableNumber(d,"packageCount"),weightKg:nullableNumber(d,"weightKg"),volumeCbm:nullableNumber(d,"volumeCbm"),chargeableWeightKg:nullableNumber(d,"chargeableWeightKg"),customsDocReference:nullable(d,"customsDocReference"),shipmentTerms:nullable(d,"shipmentTerms"),hbl:nullable(d,"hbl"),mbl:nullable(d,"mbl"),containerNumbers,serviceIds});
+    void save({customerId:String(d.get("customerId")),branchId:String(d.get("branchId")),transportMode:String(d.get("mode")) as SaveJob["transportMode"],status:String(d.get("status")) as SaveJob["status"],plannedContainerType:String(d.get("equipment")),plannedContainerCount:Number(d.get("count")),polId:String(d.get("pol")),podId:String(d.get("pod")),transshipmentPortId:nullable(d,"tp"),vessel:nullable(d,"vessel"),voyage:nullable(d,"voyage"),sailedDate:nullable(d,"sailedDate"),originPort:nullable(d,"originPort"),placeOfDelivery:nullable(d,"placeOfDelivery"),shipper:nullable(d,"shipper"),consignee:nullable(d,"consignee"),notifyName:nullable(d,"notifyName"),commodity:nullable(d,"commodity"),salesPerson:nullable(d,"salesPerson"),customerReference:nullable(d,"customerReference"),packageCount:nullableNumber(d,"packageCount"),weightKg:nullableNumber(d,"weightKg"),volumeCbm:nullableNumber(d,"volumeCbm"),chargeableWeightKg:nullableNumber(d,"chargeableWeightKg"),customsDocReference:nullable(d,"customsDocReference"),shipmentTerms:nullable(d,"shipmentTerms"),hbl:nullable(d,"hbl"),mbl:nullable(d,"mbl"),containerNumbers,serviceIds}).then(success=>{if(success&&!initial) clearJobFormDraft(draftOwner);});
   }
-  return <Modal title={initial?`Edit ${initial.jobNumber}`:"Create logistics job"} wide close={close}><form className="job-form" onSubmit={submit}>
+  return <Modal title={initial?`Edit ${initial.jobNumber}`:"Create logistics job"} wide close={close}><form ref={formRef} className="job-form" onChange={event=>persistDraft(event.currentTarget)} onSubmit={submit}>
+    {!initial&&<div className="draft-notice" role="status"><span>{draftSavedAt?`Draft saved in this browser at ${new Date(draftSavedAt).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`:"Your entries will be saved automatically in this browser."}</span>{draftSavedAt&&<button type="button" onClick={discardDraft}>Discard draft</button>}</div>}
     <div className="auto-number"><span>Job reference</span><b>{initial?.jobNumber||"Created automatically"}</b><small>{initial?"Assigned automatically and cannot be changed.":"The next reference will be assigned when you save this job."}</small></div>
     <FormSection title="Customer and route" note="Billing party and movement"><div className="two"><Field label="Customer"><select name="customerId" required defaultValue={initial?.customerId}><option value="">Select customer</option>{data.customers.filter(c=>c.active||c.id===initial?.customerId).map(c=><option value={c.id} key={c.id}>{c.name} · {c.code}</option>)}</select></Field><Field label="Branch"><select name="branchId" required defaultValue={initial?.branchId||data.branches[0]?.id}>{data.branches.filter(b=>b.active||b.id===initial?.branchId).map(b=><option value={b.id} key={b.id}>{b.name}</option>)}</select></Field></div><div className="route-fields"><Field label="POL"><PortSelect name="pol" ports={data.ports} initial={initial?.polId}/></Field><Field label="Transshipment port"><PortSelect name="tp" ports={data.ports} initial={initial?.transshipmentPortId||""} optional/></Field><Field label="POD"><PortSelect name="pod" ports={data.ports} initial={initial?.podId}/></Field></div><div className="two"><Field label="Origin port"><input name="originPort" maxLength={160} defaultValue={initial?.originPort||""}/></Field><Field label="Place of delivery"><input name="placeOfDelivery" maxLength={200} defaultValue={initial?.placeOfDelivery||""}/></Field></div></FormSection>
-    <FormSection title="Transport and references" note="Vessel, dates and documents"><div className="three"><Field label="Mode"><select name="mode" defaultValue={initial?.transportMode||"SEA"}>{["SEA","AIR","ROAD","MULTIMODAL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"OPEN"}>{["DRAFT","OPEN","COMPLETED","READY_TO_INVOICE","CANCELLED"].map(v=><option value={v} key={v}>{label(v)}</option>)}</select></Field><Field label="Sailed date"><input name="sailedDate" type="date" defaultValue={initial?.sailedDate||""}/></Field></div><div className="two"><Field label="Vessel"><input name="vessel" maxLength={160} defaultValue={initial?.vessel||""}/></Field><Field label="Voyage"><input name="voyage" maxLength={80} defaultValue={initial?.voyage||""}/></Field><Field label="Customer reference"><input name="customerReference" maxLength={120} defaultValue={initial?.customerReference||""}/></Field><Field label="Sales person"><input name="salesPerson" maxLength={160} defaultValue={initial?.salesPerson||""}/></Field><Field label="HBL"><input name="hbl" maxLength={100} defaultValue={initial?.hbl||""}/></Field><Field label="MBL"><input name="mbl" maxLength={100} defaultValue={initial?.mbl||""}/></Field><Field label="Customs document reference"><input name="customsDocReference" maxLength={160} defaultValue={initial?.customsDocReference||""}/></Field><Field label="Terms of shipment"><input name="shipmentTerms" maxLength={80} placeholder="PREPAID" defaultValue={initial?.shipmentTerms||""}/></Field></div></FormSection>
+    <FormSection title="Transport and references" note="Vessel, dates and documents"><div className="three"><Field label="Mode"><select name="mode" defaultValue={initial?.transportMode||"SEA"}>{["SEA","AIR","ROAD","MULTIMODAL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"DRAFT"}>{["DRAFT","OPEN","COMPLETED","READY_TO_INVOICE","CANCELLED"].map(v=><option value={v} key={v}>{label(v)}</option>)}</select></Field><Field label="Sailed date"><input name="sailedDate" type="date" defaultValue={initial?.sailedDate||""}/></Field></div><div className="two"><Field label="Vessel"><input name="vessel" maxLength={160} defaultValue={initial?.vessel||""}/></Field><Field label="Voyage"><input name="voyage" maxLength={80} defaultValue={initial?.voyage||""}/></Field><Field label="Customer reference"><input name="customerReference" maxLength={120} defaultValue={initial?.customerReference||""}/></Field><Field label="Sales person"><input name="salesPerson" maxLength={160} defaultValue={initial?.salesPerson||""}/></Field><Field label="HBL"><input name="hbl" maxLength={100} defaultValue={initial?.hbl||""}/></Field><Field label="MBL"><input name="mbl" maxLength={100} defaultValue={initial?.mbl||""}/></Field><Field label="Customs document reference"><input name="customsDocReference" maxLength={160} defaultValue={initial?.customsDocReference||""}/></Field><Field label="Terms of shipment"><input name="shipmentTerms" maxLength={80} placeholder="PREPAID" defaultValue={initial?.shipmentTerms||""}/></Field></div></FormSection>
     <FormSection title="Parties" note="Shipment parties shown on the invoice"><div className="two"><Field label="Shipper"><input name="shipper" maxLength={200} defaultValue={initial?.shipper||""}/></Field><Field label="Consignee"><input name="consignee" maxLength={200} defaultValue={initial?.consignee||""}/></Field><Field label="Notify name"><input name="notifyName" maxLength={200} defaultValue={initial?.notifyName||""}/></Field><Field label="Commodity"><input name="commodity" maxLength={300} defaultValue={initial?.commodity||""}/></Field></div></FormSection>
     <FormSection title="Cargo and equipment" note="Package totals and container plan"><div className="three"><Field label="Package type / equipment"><select name="equipment" defaultValue={initial?.plannedContainerType||"20GP"}>{["20GP","20SD","40GP","40HC","45HC","LCL"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Number of containers"><input name="count" type="number" min="1" max="999" defaultValue={initial?.plannedContainerCount||1}/></Field><Field label="No. of packages"><input name="packageCount" type="number" min="0" step="1" defaultValue={initial?.packageCount??""}/></Field><Field label="Weight (KGS)"><input name="weightKg" type="number" min="0" step="0.001" defaultValue={initial?.weightKg??""}/></Field><Field label="Volume (CBM)"><input name="volumeCbm" type="number" min="0" step="0.001" defaultValue={initial?.volumeCbm??""}/></Field><Field label="Chargeable weight (KGS)"><input name="chargeableWeightKg" type="number" min="0" step="0.001" defaultValue={initial?.chargeableWeightKg??""}/></Field></div>{!initial&&<Field label="Container numbers"><textarea name="containerNumbers" rows={3} placeholder="MSCU1234567 — one per line or comma separated"/><small className="input-help">Optional. You can also add containers from the job page after saving.</small></Field>}{initial&&<p className="form-help">Actual container numbers are managed in the Containers section on the job page.</p>}</FormSection>
-    <FormSection title="Services required" note="Each service can be selected once"><div className="service-picker-head"><div><b>Job services</b><small>Charges are entered separately after the job is saved.</small></div><span>{serviceIds.length} selected</span></div><div className="service-picker">{data.services.filter(s=>s.active||serviceIds.includes(s.id)).map(s=>{const selected=serviceIds.includes(s.id);return <label className={selected?"service-choice selected":"service-choice"} key={s.id}><input type="checkbox" checked={selected} onChange={()=>setServiceIds(current=>selected?current.filter(id=>id!==s.id):[...current,s.id])}/><i>{selected?"✓":"+"}</i><span><b>{s.name}</b><small>{s.code} · Charged per {s.defaultUom}</small></span></label>})}</div></FormSection>
+    <FormSection title="Services required" note="Each service can be selected once"><div className="service-picker-head"><div><b>Job services</b><small>Charges are entered separately after the job is saved.</small></div><span>{serviceIds.length} selected</span></div><div className="service-picker">{data.services.filter(s=>s.active||serviceIds.includes(s.id)).map(s=>{const selected=serviceIds.includes(s.id);return <label className={selected?"service-choice selected":"service-choice"} key={s.id}><input type="checkbox" checked={selected} onChange={()=>toggleService(s.id)}/><i>{selected?"✓":"+"}</i><span><b>{s.name}</b><small>{s.code} · Charged per {s.defaultUom}</small></span></label>})}</div></FormSection>
     {!serviceIds.length&&<p className="form-help validation-help">Select at least one service to continue.</p>}<FormButtons label={initial?"Update job":"Create job"} close={close} disabled={!serviceIds.length}/>
   </form></Modal>;
 }
