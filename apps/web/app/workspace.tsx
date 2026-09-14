@@ -34,6 +34,12 @@ import {
   saveVendorInvoiceDraft,
 } from "./vendor-invoice-draft";
 import {
+  navigationPaths,
+  pageFromPathname,
+  type NavigationPage,
+  type Page,
+} from "./navigation";
+import {
   chargeAmounts,
   formatChargeRate,
   type ChargeCurrency,
@@ -41,15 +47,6 @@ import {
 import "./invoice-flow.css";
 import "./job-editor.css";
 
-type NavigationPage =
-  | "Dashboard"
-  | "Customers"
-  | "Jobs"
-  | "Invoices"
-  | "Costs"
-  | "Masters"
-  | "Users";
-type Page = NavigationPage | "New Job" | "New Vendor Invoice";
 type Dialog =
   | "customer"
   | "job"
@@ -102,13 +99,7 @@ export function Workspace() {
   const router = useRouter();
   const pathname = usePathname();
   const { session, user, signOut } = useAuth();
-  const [page, setPage] = useState<Page>(
-    pathname === "/jobs/new"
-      ? "New Job"
-      : pathname === "/costs/new"
-        ? "New Vendor Invoice"
-        : "Dashboard",
-  );
+  const [page, setPage] = useState<Page>(() => pageFromPathname(pathname));
   const [masters, setMasters] = useState<MasterData | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -174,26 +165,8 @@ export function Workspace() {
     void load();
   }, [load]);
   useEffect(() => {
-    if (pathname === "/jobs/new") setPage("New Job");
-    else if (pathname === "/costs/new") setPage("New Vendor Invoice");
-    else {
-      const remembered = window.localStorage.getItem("transwave:last-page");
-      setPage((current) =>
-        current === "New Job"
-          ? "Jobs"
-          : current === "New Vendor Invoice"
-            ? "Costs"
-            : (Object.keys(icons) as string[]).includes(remembered || "")
-              ? (remembered as NavigationPage)
-              : current,
-      );
-    }
+    setPage(pageFromPathname(pathname));
   }, [pathname]);
-  useEffect(() => {
-    if ((Object.keys(icons) as string[]).includes(page)) {
-      window.localStorage.setItem("transwave:last-page", page);
-    }
-  }, [page]);
 
   async function openJob(id: string) {
     if (!session) return;
@@ -201,6 +174,7 @@ export function Workspace() {
     try {
       setSelectedJob(await api.job(session, id));
       setPage("Jobs");
+      router.push(navigationPaths.Jobs);
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -213,6 +187,7 @@ export function Workspace() {
     try {
       setSelectedInvoice(await api.invoice(session, id));
       setPage("Invoices");
+      router.push(navigationPaths.Invoices);
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -225,6 +200,7 @@ export function Workspace() {
     try {
       setSelectedVendorBill(await api.vendorBill(session, id));
       setPage("Costs");
+      router.push(navigationPaths.Costs);
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -262,7 +238,7 @@ export function Workspace() {
     }
   }
   const nav = (next: Page) => {
-    router.push(next === "New Job" ? "/jobs/new" : next === "New Vendor Invoice" ? "/costs/new" : "/");
+    router.push(navigationPaths[next]);
     setPage(next);
     setDialog(null);
     setError("");
@@ -272,22 +248,22 @@ export function Workspace() {
     setDialog(null);
     setError("");
     setPage("New Job");
-    router.push("/jobs/new");
+    router.push(navigationPaths["New Job"]);
   };
   const closeJobPage = () => {
     setPage("Jobs");
-    router.push("/");
+    router.push(navigationPaths.Jobs);
   };
   const openNewVendorInvoice = () => {
     setSelectedVendorBill(null);
     setDialog(null);
     setError("");
     setPage("New Vendor Invoice");
-    router.push("/costs/new");
+    router.push(navigationPaths["New Vendor Invoice"]);
   };
   const closeVendorInvoicePage = () => {
     setPage("Costs");
-    router.push("/");
+    router.push(navigationPaths.Costs);
   };
   if (!session || !user || !masters)
     return (
@@ -455,7 +431,7 @@ export function Workspace() {
                 (value) => {
                   setSelectedJob(value);
                   setPage("Jobs");
-                  router.push("/");
+                  router.push(navigationPaths.Jobs);
                 },
               )
             }
@@ -479,7 +455,7 @@ export function Workspace() {
             }, (value) => {
               setSelectedVendorBill(value);
               setPage("Costs");
-              router.push("/");
+              router.push(navigationPaths.Costs);
             })}
           />
         )}
@@ -631,6 +607,7 @@ export function Workspace() {
               (value) => {
                 setSelectedInvoice(value);
                 setPage("Invoices");
+                router.push(navigationPaths.Invoices);
               },
             )
           }
