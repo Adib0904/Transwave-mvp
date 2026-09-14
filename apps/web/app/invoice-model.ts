@@ -24,7 +24,7 @@ export function allocatedInvoice(invoices: DraftInvoice[], jobId: string, charge
 export function availableCharges(state: BillingState, jobId: string) {
   return (state.chargesByJob[jobId] || []).filter(line => !allocatedInvoice(state.invoices, jobId, line.id));
 }
-export const draftId = (sequence: number) => `INV/2026/${String(sequence).padStart(6, "0")}`;
+export const draftId = (sequence: number) => `INV/TSW/2026/${String(sequence).padStart(5, "0")}`;
 export function draftCharges(state: BillingState, jobId: string, chargeIds: string[]): Charge[] | null {
   const ids = new Set(chargeIds);
   const lines = availableCharges(state, jobId).filter(line => ids.has(line.id));

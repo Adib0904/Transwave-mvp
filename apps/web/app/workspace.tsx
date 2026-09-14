@@ -141,6 +141,9 @@ export function Workspace() {
   const canManageBilling = ["OWNER", "ADMIN", "FINANCE"].includes(
     user?.role ?? "VIEWER",
   );
+  const canManageCharges = ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"].includes(
+    user?.role ?? "VIEWER",
+  );
   const canManageSetup = ["OWNER", "ADMIN"].includes(user?.role ?? "VIEWER");
 
   const load = useCallback((): Promise<void> => {
@@ -444,7 +447,8 @@ export function Workspace() {
             jobs={jobs}
             selected={selectedJob}
             canEdit={canManageOperations}
-            canBill={canManageBilling}
+            canBill={canManageCharges}
+            canInvoice={canManageBilling}
             onOpen={openJob}
             onEdit={() => setDialog("job")}
             onContainer={() => setDialog("container")}
@@ -808,7 +812,7 @@ function Customers({
       <div className="table customers">
         <div className="thead">
           <span>Customer / ID</span>
-          <span>VAT No.</span>
+          <span>TRN number</span>
           <span>Currency</span>
           <span>Terms</span>
           <span>Status</span>
@@ -839,6 +843,7 @@ function Jobs(props: {
   selected: JobDetail | null;
   canEdit: boolean;
   canBill: boolean;
+  canInvoice: boolean;
   onOpen(id: string): void;
   onEdit(): void;
   onContainer(): void;
@@ -1071,7 +1076,7 @@ function Jobs(props: {
                 ? ""
                 : "s"}
             </span>
-            {props.canBill && selected.charges.some((c) => !c.invoiceId) && (
+            {props.canInvoice && selected.charges.some((c) => !c.invoiceId) && (
               <button className="button" onClick={props.onInvoice}>
                 Create invoice
               </button>
@@ -1555,12 +1560,13 @@ function CustomerDialog({
           <input name="name" required defaultValue={initial?.name} />
         </Field>
         <div className="two">
-          <Field label="VAT No.">
+          <Field label="TRN number">
             <input
               name="trn"
               maxLength={32}
               defaultValue={initial?.trn || ""}
             />
+            <small className="input-help">Tax Registration Number shown on customer invoices.</small>
           </Field>
           <Field label="Billing email">
             <input
@@ -2152,9 +2158,10 @@ function ContainerDialog({
           <input
             name="number"
             required
-            pattern="[A-Za-z]{4}[0-9]{7}"
-            placeholder="MSCU1234567"
+            maxLength={64}
+            placeholder="Enter the container reference"
           />
+          <small className="input-help">Any carrier container reference is accepted.</small>
         </Field>
         <div className="two">
           <Field label="Size">

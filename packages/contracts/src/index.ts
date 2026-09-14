@@ -192,7 +192,8 @@ export const containerSchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z]{4}\d{7}$/),
+    .min(1)
+    .max(64),
   size: z.enum(["20", "40", "45"]),
   containerType: z.string().trim().min(1).max(24),
   sealNumber: z.string().trim().max(64).nullable(),
@@ -349,7 +350,8 @@ export const saveJobSchema = z
           .string()
           .trim()
           .toUpperCase()
-          .regex(/^[A-Z]{4}\d{7}$/),
+          .min(1)
+          .max(64),
       )
       .max(999)
       .default([])
@@ -402,7 +404,8 @@ export const saveContainerSchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z]{4}\d{7}$/),
+    .min(1)
+    .max(64),
   size: z.enum(["20", "40", "45"]),
   containerType: z.string().trim().min(1).max(24),
   sealNumber: z.string().trim().max(64).nullable().default(null),

@@ -27,5 +27,6 @@ assert.equal(parsed.length, 42);
 assert.equal(parsed[0], "DOLU2008497");
 assert.equal(parsed.at(-1), "AMFU3231331");
 assert.deepEqual(Array.from(parseContainerManifest("mscu1234567, MSCU1234567 / 40HC")), ["MSCU1234567"]);
-assert.deepEqual(Array.from(parseContainerManifest("20SD / invalid")), []);
-console.log("PASS: manifest parser accepts number/equipment pairs, whitespace, case and duplicates");
+assert.deepEqual(Array.from(parseContainerManifest("carrier-ref-7")), ["CARRIER-REF-7"]);
+assert.deepEqual(Array.from(parseContainerManifest("box-a / 20SD box-b / 40HC")), ["BOX-A", "BOX-B"]);
+console.log("PASS: manifest parser accepts standard and carrier-specific references");

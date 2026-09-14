@@ -131,7 +131,7 @@ export class JobsService {
     jobId: string,
     input: CreateCharge,
   ): Promise<JobDetail> {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const { error } = await database.rpc("save_job_charge", {
       p_job_id: jobId,
       p_job_service_id: input.jobServiceId,
@@ -153,7 +153,7 @@ export class JobsService {
     jobId: string,
     chargeId: string,
   ): Promise<JobDetail> {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const { error } = await database
       .from("job_charges")
       .delete()

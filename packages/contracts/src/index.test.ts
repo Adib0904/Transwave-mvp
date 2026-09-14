@@ -6,6 +6,7 @@ import {
   createDraftSchema,
   createManagedUserSchema,
   normalizeServiceName,
+  saveContainerSchema,
   saveVendorBillSchema,
 } from "./index.js";
 
@@ -26,6 +27,18 @@ test("normalizes service identity and rejects duplicate draft charge ids", () =>
   assert.equal(normalizeServiceName("  LAND   Transport "), "land transport");
   const id = "11111111-1111-4111-8111-111111111111";
   assert.equal(createDraftSchema.safeParse({ jobId: id, chargeIds: [id, id] }).success, false);
+});
+
+test("accepts carrier-specific container references", () => {
+  assert.equal(
+    saveContainerSchema.safeParse({
+      containerNumber: "carrier-ref-7",
+      size: "20",
+      containerType: "GP",
+      sealNumber: null,
+    }).success,
+    true,
+  );
 });
 
 test("validates managed portal users and strong temporary passwords", () => {

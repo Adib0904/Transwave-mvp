@@ -32,6 +32,7 @@ const job = {
   pod: 'Jebel Ali (AEJEA)',
 };
 const drafted = reduce(initial, { type: 'createDraft', job, chargeIds: ['one'], customerTrn: '', paymentTerms: '', createdAt: '2026-09-11' });
+assert.equal(drafted.invoices[0].id, 'INV/TSW/2026/00145');
 assert.equal(drafted.invoices[0].job.transshipmentPort, 'Singapore (SGSIN)');
 assert.equal(reduce(drafted, { type: 'updateCharge', jobId: 'a', charge: { ...line, rate: 500 } }), drafted);
 assert.equal(drafted.invoices[0].lines[0].rate, 100);
