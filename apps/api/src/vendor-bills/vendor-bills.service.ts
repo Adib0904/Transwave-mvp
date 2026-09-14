@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { SaveVendorBill, VendorBill } from "@transwave/contracts";
+import type { AttachVendorDocument, SaveVendorBill, VendorBill } from "@transwave/contracts";
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
@@ -55,6 +55,17 @@ export class VendorBillsService {
     if (error) throwDatabaseError(error);
   }
 
+  async attachDocument(database: TransWaveDatabaseClient, userId: string, id: string, input: AttachVendorDocument) {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    const { error } = await database.rpc("attach_vendor_bill_document", {
+      p_id: id,
+      p_storage_path: input.storagePath,
+      p_file_name: input.fileName,
+    });
+    if (error) throwDatabaseError(error);
+    return this.findOne(database, id);
+  }
+
   private async save(database: TransWaveDatabaseClient, id: string | null, input: SaveVendorBill): Promise<string> {
     const args = {
       p_id: id,
@@ -108,6 +119,7 @@ export class VendorBillsService {
       department: bill.department,
       remarks: bill.remarks,
       sourceFileName: bill.source_file_name,
+      sourceFilePath: bill.source_file_path,
       status: bill.status as VendorBill["status"],
       revenueAllocatedAed: money(revenue),
       subtotalAed: money(subtotal),

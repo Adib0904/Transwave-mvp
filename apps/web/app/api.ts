@@ -77,7 +77,40 @@ export const api = {
   vendorBill: (s: Session, id: string) => call<VendorBill>(s, `/vendor-bills/${id}`),
   createVendorBill: (s: Session, value: SaveVendorBill) => call<VendorBill>(s, "/vendor-bills", { method: "POST", body: JSON.stringify(value) }),
   updateVendorBill: (s: Session, id: string, value: SaveVendorBill) => call<VendorBill>(s, `/vendor-bills/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
-  removeVendorBill: (s: Session, id: string) => call<void>(s, `/vendor-bills/${id}`, { method: "DELETE" }),
+  uploadVendorDocument: async (s: Session, companyId: string, billId: string, file: File) => {
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      throw new ApiError("Upload a PDF vendor invoice", 400);
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      throw new ApiError("Vendor invoice PDF must be 25 MB or smaller", 400);
+    }
+    const storagePath = `${companyId}/vendor-bills/${billId}/source.pdf`;
+    const uploaded = await supabase.storage.from("invoice-documents").upload(storagePath, file, {
+      contentType: "application/pdf",
+      upsert: true,
+    });
+    if (uploaded.error) throw new ApiError(uploaded.error.message, 400);
+    try {
+      return await call<VendorBill>(s, `/vendor-bills/${billId}/document`, {
+        method: "PATCH",
+        body: JSON.stringify({ storagePath, fileName: file.name }),
+      });
+    } catch (reason) {
+      await supabase.storage.from("invoice-documents").remove([storagePath]);
+      throw reason;
+    }
+  },
+  vendorDocumentUrl: async (storagePath: string) => {
+    const result = await supabase.storage.from("invoice-documents").createSignedUrl(storagePath, 300);
+    if (result.error) throw new ApiError(result.error.message, 400);
+    return result.data.signedUrl;
+  },
+  removeVendorBill: async (s: Session, bill: VendorBill) => {
+    await call<void>(s, `/vendor-bills/${bill.id}`, { method: "DELETE" });
+    if (bill.sourceFilePath) {
+      await supabase.storage.from("invoice-documents").remove([bill.sourceFilePath]);
+    }
+  },
   users: (s: Session) => call<ManagedUser[]>(s, "/users"),
   createUser: (s: Session, value: CreateManagedUser) => call<ManagedUser>(s, "/users", { method: "POST", body: JSON.stringify(value) }),
   updateUser: (s: Session, id: string, value: UpdateManagedUser) => call<ManagedUser>(s, `/users/${id}`, { method: "PATCH", body: JSON.stringify(value) })

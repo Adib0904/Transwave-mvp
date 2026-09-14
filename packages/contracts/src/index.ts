@@ -531,6 +531,11 @@ export const saveVendorBillSchema = z.object({
   lines: z.array(vendorBillLineInputSchema).min(1).max(100),
 });
 
+export const attachVendorDocumentSchema = z.object({
+  storagePath: z.string().trim().min(1).max(600),
+  fileName: z.string().trim().min(1).max(255).regex(/\.pdf$/i, "Upload a PDF file"),
+});
+
 export const vendorBillLineSchema = vendorBillLineInputSchema.extend({
   id: uuidSchema,
   lineNumber: z.number().int().positive(),
@@ -558,6 +563,7 @@ export const vendorBillSchema = z.object({
   department: z.string().nullable(),
   remarks: z.string().nullable(),
   sourceFileName: z.string().nullable(),
+  sourceFilePath: z.string().nullable(),
   status: vendorBillStatusSchema,
   revenueAllocatedAed: moneySchema,
   subtotalAed: moneySchema,
@@ -598,6 +604,7 @@ export type CreateDraft = z.infer<typeof createDraftSchema>;
 export type Invoice = z.infer<typeof invoiceSchema>;
 export type VendorBill = z.infer<typeof vendorBillSchema>;
 export type SaveVendorBill = z.infer<typeof saveVendorBillSchema>;
+export type AttachVendorDocument = z.infer<typeof attachVendorDocumentSchema>;
 
 function decimalToScaled(value: string, scale: number): bigint {
   const [whole, fraction = ""] = value.split(".");

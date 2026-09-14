@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import { saveVendorBillSchema, type SaveVendorBill } from "@transwave/contracts";
+import { attachVendorDocumentSchema, saveVendorBillSchema, type AttachVendorDocument, type SaveVendorBill } from "@transwave/contracts";
 import { SupabaseAuthGuard } from "../auth/supabase-auth.guard.js";
 import type { AuthenticatedRequest } from "../auth/authenticated-request.js";
 import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
@@ -16,5 +16,6 @@ export class VendorBillsController {
   @Get(":id") findOne(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) { return this.bills.findOne(request.database, id); }
   @Post() create(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveVendorBillSchema)) input: SaveVendorBill) { return this.bills.create(request.database, request.auth.userId, input); }
   @Patch(":id") update(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveVendorBillSchema)) input: SaveVendorBill) { return this.bills.update(request.database, request.auth.userId, id, input); }
+  @Patch(":id/document") attachDocument(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(attachVendorDocumentSchema)) input: AttachVendorDocument) { return this.bills.attachDocument(request.database, request.auth.userId, id, input); }
   @Delete(":id") @HttpCode(204) remove(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) { return this.bills.remove(request.database, request.auth.userId, id); }
 }

@@ -45,11 +45,20 @@ async function api(path, token, init = {}) {
 
 const finance = await signIn("finance@transwave.local", "Transwave123!");
 const viewer = await signIn("viewer@secondco.local", "Secondco123!");
+const financeStorage = createClient(supabaseUrl, publishableKey, {
+  global: { headers: { Authorization: `Bearer ${finance}` } },
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+const viewerStorage = createClient(supabaseUrl, publishableKey, {
+  global: { headers: { Authorization: `Bearer ${viewer}` } },
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 const suffix = Date.now().toString(36).toUpperCase();
 let vendorId;
 let billId;
 let temporaryJobId;
 let temporaryInvoiceId;
+let documentPath;
 
 try {
   const [invoices, masters] = await Promise.all([
@@ -178,6 +187,31 @@ try {
   assert(created.body.subtotalAed === "29480.00", "USD cost was not converted at 3.685");
   assert(created.body.profitAed === (Number(allocation) - 29480).toFixed(2), "Profit was not calculated from allocated income and vendor cost");
 
+  const account = await api("/account/me", finance);
+  documentPath = `${account.body.companyId}/vendor-bills/${billId}/source.pdf`;
+  const uploaded = await financeStorage.storage.from("invoice-documents").upload(
+    documentPath,
+    new Blob(["%PDF-1.4\n%%EOF"], { type: "application/pdf" }),
+    { contentType: "application/pdf" },
+  );
+  assert(!uploaded.error, `Vendor PDF upload failed: ${uploaded.error?.message}`);
+  const attached = await api(`/vendor-bills/${billId}/document`, finance, {
+    method: "PATCH",
+    body: JSON.stringify({ storagePath: documentPath, fileName: "OTSDXB260700096 INV.pdf" }),
+  });
+  assert(attached.status === 200, `Vendor PDF attachment failed: ${JSON.stringify(attached.body)}`);
+  assert(attached.body.sourceFilePath === documentPath, "Vendor PDF path was not linked to the bill");
+  const signed = await financeStorage.storage.from("invoice-documents").createSignedUrl(documentPath, 60);
+  assert(!signed.error && Boolean(signed.data.signedUrl), "A private vendor PDF link was not created");
+  const replaced = await financeStorage.storage.from("invoice-documents").upload(
+    documentPath,
+    new Blob(["%PDF-1.4\n% replacement\n%%EOF"], { type: "application/pdf" }),
+    { contentType: "application/pdf", upsert: true },
+  );
+  assert(!replaced.error, `Vendor PDF replacement failed: ${replaced.error?.message}`);
+  const forbiddenDocument = await viewerStorage.storage.from("invoice-documents").createSignedUrl(documentPath, 60);
+  assert(Boolean(forbiddenDocument.error), "Another company could create a vendor PDF link");
+
   const updated = await api(`/vendor-bills/${billId}`, finance, {
     method: "PATCH",
     body: JSON.stringify({ ...billInput, lines: [{ ...billInput.lines[0], unitRate: "1900.00" }] }),
@@ -196,9 +230,13 @@ try {
     updatedExpenseAed: updated.body.subtotalAed,
     updatedLineCount: updated.body.lines.length,
     profitAed: updated.body.profitAed,
+    privatePdfUpload: "passed",
+    privatePdfReplacement: "passed",
+    documentTenantIsolation: "passed",
     tenantIsolation: "passed",
   }, null, 2));
 } finally {
+  if (documentPath) await financeStorage.storage.from("invoice-documents").remove([documentPath]);
   if (billId) await api(`/vendor-bills/${billId}`, finance, { method: "DELETE" });
   if (vendorId) await system.from("vendors").delete().eq("id", vendorId);
   if (temporaryInvoiceId) await system.from("invoices").delete().eq("id", temporaryInvoiceId);

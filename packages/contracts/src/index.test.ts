@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  attachVendorDocumentSchema,
   calculateLineAmounts,
   createDraftSchema,
   createManagedUserSchema,
@@ -62,6 +63,23 @@ test("validates AED and USD vendor invoice lines", () => {
     saveVendorBillSchema.safeParse({
       ...input,
       lines: [{ ...input.lines[0], currency: "AED", exchangeRate: "3.685" }],
+    }).success,
+    false,
+  );
+});
+
+test("accepts only PDF vendor document metadata", () => {
+  assert.equal(
+    attachVendorDocumentSchema.safeParse({
+      storagePath: "company/vendor-bills/bill/source.pdf",
+      fileName: "Vendor Invoice.PDF",
+    }).success,
+    true,
+  );
+  assert.equal(
+    attachVendorDocumentSchema.safeParse({
+      storagePath: "company/vendor-bills/bill/source.pdf",
+      fileName: "invoice.exe",
     }).success,
     false,
   );

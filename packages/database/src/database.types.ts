@@ -1199,6 +1199,7 @@ export type Database = {
           remarks: string | null
           revenue_allocated_aed: number
           source_file_name: string | null
+          source_file_path: string | null
           status: string
           updated_at: string
           vendor_id: string
@@ -1218,6 +1219,7 @@ export type Database = {
           remarks?: string | null
           revenue_allocated_aed?: number
           source_file_name?: string | null
+          source_file_path?: string | null
           status?: string
           updated_at?: string
           vendor_id: string
@@ -1237,6 +1239,7 @@ export type Database = {
           remarks?: string | null
           revenue_allocated_aed?: number
           source_file_name?: string | null
+          source_file_path?: string | null
           status?: string
           updated_at?: string
           vendor_id?: string
@@ -1341,6 +1344,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      attach_vendor_bill_document: {
+        Args: { p_file_name: string; p_id: string; p_storage_path: string }
+        Returns: undefined
+      }
       create_invoice_draft: {
         Args: { p_charge_ids: string[]; p_job_id: string }
         Returns: string

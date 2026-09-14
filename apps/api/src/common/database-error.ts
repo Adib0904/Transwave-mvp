@@ -56,6 +56,8 @@ const safeMessages: Record<string, string> = {
     "Select a customer invoice before allocating revenue",
   REVENUE_ALLOCATION_EXCEEDS_INVOICE:
     "Allocated revenue exceeds the remaining customer invoice subtotal",
+  INVALID_VENDOR_DOCUMENT_PATH: "The vendor document storage path is invalid",
+  INVALID_VENDOR_DOCUMENT: "Upload a valid PDF vendor invoice",
 };
 
 export function throwDatabaseError(
