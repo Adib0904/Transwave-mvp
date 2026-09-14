@@ -60,6 +60,14 @@ type Dialog =
   | "vendorBill"
   | null;
 type AssignedService = JobDetail["services"][number];
+type Confirmation = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger?: boolean;
+  run(): Promise<void>;
+  cancel(): void;
+};
 const money = new Intl.NumberFormat("en-AE", {
   style: "currency",
   currency: "AED",
@@ -74,6 +82,8 @@ const icons: Record<NavigationPage, string> = {
   Users: "♙",
 };
 const label = (value: string) => value.replaceAll("_", " ");
+const vendorBillStatusLabel = (status: VendorBill["status"]) =>
+  status === "DRAFT" ? "PENDING REVIEW" : label(status);
 const route = (job: JobSummary | JobDetail) =>
   [job.polName, job.transshipmentPortName, job.podName]
     .filter(Boolean)
@@ -108,6 +118,8 @@ export function Workspace() {
   const [vendorBills, setVendorBills] = useState<VendorBill[]>([]);
   const [selectedVendorBill, setSelectedVendorBill] = useState<VendorBill | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingPort, setEditingPort] = useState<Port | null>(null);
   const [editingService, setEditingService] = useState<
@@ -242,9 +254,29 @@ export function Workspace() {
       return false;
     }
   }
+  function confirmAction<T>(
+    options: Omit<Confirmation, "run" | "cancel">,
+    work: () => Promise<T>,
+    after?: (value: T) => void,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      setConfirmation({
+        ...options,
+        run: async () => {
+          setConfirmation(null);
+          resolve(await act(work, after));
+        },
+        cancel: () => {
+          setConfirmation(null);
+          resolve(false);
+        },
+      });
+    });
+  }
   const nav = (next: Page) => {
     goTo(next);
     setDialog(null);
+    setProfileOpen(false);
     setError("");
   };
   const openNewJob = () => {
@@ -275,6 +307,20 @@ export function Workspace() {
   const pages = (Object.keys(icons) as NavigationPage[]).filter(
     (item) => item !== "Users" || ["OWNER", "ADMIN"].includes(user.role),
   );
+  const managedProfile = users.find((item) => item.id === user.userId);
+  const profileName =
+    managedProfile?.name ||
+    user.email
+      .split("@")[0]
+      .replace(/[._-]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const profileInitials = profileName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
   return (
     <main className="app-shell">
       <aside className="side">
@@ -302,18 +348,21 @@ export function Workspace() {
             {item}
           </button>
         ))}
-        <div className="user">
-          <i>{user.email.slice(0, 2).toUpperCase()}</i>
-          <div>
-            <b>{user.email}</b>
-            <small>{label(user.role)}</small>
-          </div>
-          <button
-            aria-label="Sign out"
-            title="Sign out"
-            onClick={() => void signOut()}
-          >
-            ↪
+        <div className="profile-area">
+          {profileOpen && (
+            <div className="profile-menu" role="dialog" aria-label="Profile">
+              <div className="profile-menu-head">
+                <i>{profileInitials}</i>
+                <span><b>{profileName}</b><small>{label(user.role)}</small></span>
+              </div>
+              <dl><div><dt>Email</dt><dd>{user.email}</dd></div><div><dt>Company</dt><dd>{user.companyName}</dd></div>{user.branchName&&<div><dt>Branch</dt><dd>{user.branchName}</dd></div>}</dl>
+              <button className="profile-signout" onClick={() => void signOut()}>Sign out</button>
+            </div>
+          )}
+          <button className="profile-trigger" aria-expanded={profileOpen} aria-label="Open profile" onClick={() => setProfileOpen((open) => !open)}>
+            <i>{profileInitials}</i>
+            <span><b>{profileName}</b><small>{label(user.role)}</small></span>
+            <em>⌃</em>
           </button>
         </div>
       </aside>
@@ -400,7 +449,7 @@ export function Workspace() {
             onEdit={() => setDialog("job")}
             onContainer={() => setDialog("container")}
             onRemoveContainer={(id) =>
-              void act(
+              void confirmAction({ title: "Remove container?", message: "The container will be removed from this job.", confirmLabel: "Remove container", danger: true },
                 () => api.removeContainer(session, selectedJob!.id, id),
                 setSelectedJob,
               )
@@ -410,7 +459,7 @@ export function Workspace() {
               setDialog("charge");
             }}
             onRemoveCharge={(id) =>
-              void act(
+              void confirmAction({ title: "Delete charge?", message: "This job charge will be permanently deleted.", confirmLabel: "Delete charge", danger: true },
                 () => api.removeCharge(session, selectedJob!.id, id),
                 setSelectedJob,
               )
@@ -444,7 +493,10 @@ export function Workspace() {
             draftOwner={user.userId}
             close={closeVendorInvoicePage}
             save={(input, file) => act(async () => {
-              const saved = await api.createVendorBill(session, input);
+              const saved = await api.createVendorBill(session, {
+                ...input,
+                status: "APPROVED",
+              });
               try {
                 return await api.uploadVendorDocument(session, user.companyId, saved.id, file);
               } catch (reason) {
@@ -480,7 +532,7 @@ export function Workspace() {
             canEdit={canManageBilling}
             onOpen={openVendorBill}
             onEdit={() => setDialog("vendorBill")}
-            onDelete={() => selectedVendorBill && void act(() => api.removeVendorBill(session, selectedVendorBill), () => setSelectedVendorBill(null))}
+            onDelete={() => selectedVendorBill && void confirmAction({ title: "Delete vendor invoice?", message: `${selectedVendorBill.vendorInvoiceNumber} and its uploaded document will be permanently deleted.`, confirmLabel: "Delete invoice", danger: true }, () => api.removeVendorBill(session, selectedVendorBill), () => setSelectedVendorBill(null))}
             onVendor={(vendor) => { setEditingVendor(vendor); setDialog("vendor"); }}
             onOpenInvoice={openInvoice}
             onOpenDocument={(path) => void openVendorDocument(path)}
@@ -545,11 +597,9 @@ export function Workspace() {
           currencies={masters.currencies}
           close={() => setDialog(null)}
           save={(input) =>
-            void act(() =>
-              editingCustomer
-                ? api.updateCustomer(session, editingCustomer.id, input)
-                : api.createCustomer(session, input),
-            )
+            void (editingCustomer
+              ? confirmAction({ title: "Save customer changes?", message: `Update the saved details for ${editingCustomer.name}?`, confirmLabel: "Save changes" }, () => api.updateCustomer(session, editingCustomer.id, input))
+              : act(() => api.createCustomer(session, input)))
           }
         />
       )}
@@ -560,7 +610,7 @@ export function Workspace() {
           draftOwner={user.userId}
           close={() => setDialog(null)}
           save={(input) =>
-            act(
+            confirmAction({ title: "Save job changes?", message: `Update ${selectedJob.jobNumber} with these details?`, confirmLabel: "Save changes" },
               () => api.updateJob(session, selectedJob.id, input),
               (value) => {
                 setSelectedJob(value);
@@ -588,10 +638,9 @@ export function Workspace() {
           currencies={masters.currencies}
           close={() => setDialog(null)}
           save={(input) =>
-            void act(
-              () => api.saveCharge(session, selectedJob.id, input),
-              setSelectedJob,
-            )
+            void (chargeService.charge
+              ? confirmAction({ title: "Update charge?", message: `Save the revised ${chargeService.service.name} charge?`, confirmLabel: "Update charge" }, () => api.saveCharge(session, selectedJob.id, input), setSelectedJob)
+              : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob))
           }
         />
       )}
@@ -615,11 +664,9 @@ export function Workspace() {
           initial={editingPort}
           close={() => setDialog(null)}
           save={(input) =>
-            void act(() =>
-              editingPort
-                ? api.updatePort(session, editingPort.id, input)
-                : api.createPort(session, input),
-            )
+            void (editingPort
+              ? confirmAction({ title: "Save port changes?", message: `Update ${editingPort.name}?`, confirmLabel: "Save changes" }, () => api.updatePort(session, editingPort.id, input))
+              : act(() => api.createPort(session, input)))
           }
         />
       )}
@@ -629,11 +676,9 @@ export function Workspace() {
           data={masters}
           close={() => setDialog(null)}
           save={(input) =>
-            void act(() =>
-              editingService
-                ? api.updateService(session, editingService.id, input)
-                : api.createService(session, input),
-            )
+            void (editingService
+              ? confirmAction({ title: "Save service changes?", message: `Update ${editingService.name}?`, confirmLabel: "Save changes" }, () => api.updateService(session, editingService.id, input))
+              : act(() => api.createService(session, input)))
           }
         />
       )}
@@ -643,15 +688,13 @@ export function Workspace() {
           canAssignOwner={user.role === "OWNER"}
           close={() => setDialog(null)}
           save={(input) =>
-            void act(() =>
-              editingUser
-                ? api.updateUser(
+            void (editingUser
+              ? confirmAction({ title: "Save user changes?", message: `Update access and profile details for ${editingUser.name}?`, confirmLabel: "Save changes" }, () => api.updateUser(
                     session,
                     editingUser.id,
                     input as UpdateManagedUser,
-                  )
-                : api.createUser(session, input as CreateManagedUser),
-            )
+                  ))
+              : act(() => api.createUser(session, input as CreateManagedUser)))
           }
         />
       )}
@@ -659,7 +702,7 @@ export function Workspace() {
         <VendorDialog
           initial={editingVendor}
           close={() => setDialog(null)}
-          save={(input) => void act(() => editingVendor ? api.updateVendor(session, editingVendor.id, input) : api.createVendor(session, input))}
+          save={(input) => void (editingVendor ? confirmAction({ title: "Save vendor changes?", message: `Update ${editingVendor.name}?`, confirmLabel: "Save changes" }, () => api.updateVendor(session, editingVendor.id, input)) : act(() => api.createVendor(session, input)))}
         />
       )}
       {dialog === "vendorBill" && (
@@ -670,7 +713,7 @@ export function Workspace() {
           invoices={invoices}
           bills={vendorBills}
           close={() => setDialog(null)}
-          save={(input, file) => void act(async () => {
+          save={(input, file) => void confirmAction({ title: "Save vendor invoice changes?", message: "The expense, links and uploaded document will be updated.", confirmLabel: "Save changes" }, async () => {
             const saved = selectedVendorBill
               ? await api.updateVendorBill(session, selectedVendorBill.id, input)
               : await api.createVendorBill(session, input);
@@ -682,6 +725,11 @@ export function Workspace() {
               throw reason;
             }
           }, setSelectedVendorBill)}
+        />
+      )}
+      {confirmation && (
+        <ConfirmationDialog
+          {...confirmation}
         />
       )}
     </main>
@@ -1218,8 +1266,8 @@ function Costs({ bills, vendors, selected, canEdit, onOpen, onEdit, onDelete, on
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
   return <>
     <div className="metrics cost-metrics"><Metric label="Allocated income" value={money.format(revenue)} note="Customer revenue before VAT"/><Metric label="Vendor expense" value={money.format(expense)} note="Vendor cost before VAT"/><Metric label="Gross profit" value={money.format(profit)} note="Income minus vendor expense" good={profit >= 0}/><Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0}/></div>
-    <div className="cost-layout"><Panel title="Vendor invoices" sub={`${bills.length} recorded expense${bills.length === 1 ? "" : "s"}`}><div className="invoice-list">{bills.map(bill=><button className={selected?.id===bill.id?"invoice selected":"invoice"} key={bill.id} onClick={()=>onOpen(bill.id)}><b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span><Tag text={bill.status}/><strong>{money.format(Number(bill.totalAmountAed))}</strong></button>)}</div></Panel>
-    {selected?<section className="panel"><div className="panel-head"><div><h2>{selected.vendorInvoiceNumber}</h2><p>{selected.vendorName} · Job {selected.jobNumber}</p></div><Tag text={selected.status}/></div><div className="detail-grid"><Detail label="Vendor TRN" value={selected.vendorTrn||"—"}/><Detail label="Bill date" value={selected.billDate}/><Detail label="B/L number" value={selected.blNumber||"—"}/><div className="detail"><small>CUSTOMER INVOICE</small>{selected.customerInvoiceId?<button className="link-button" onClick={()=>onOpenInvoice(selected.customerInvoiceId!)}>{selected.customerInvoiceNumber}</button>:<b>Not linked</b>}</div><div className="detail"><small>VENDOR INVOICE PDF</small>{selected.sourceFilePath?<button className="link-button" onClick={()=>onOpenDocument(selected.sourceFilePath!)}>View {selected.sourceFileName}</button>:<b>Not uploaded</b>}</div></div><table className="charge-table"><thead><tr><th>Vendor service</th><th>Qty</th><th>Rate / FX</th><th>Cost AED</th><th>VAT</th></tr></thead><tbody>{selected.lines.map(line=><tr key={line.id}><td>{line.serviceName||line.description}<small>{line.description}</small></td><td>{line.quantity} {line.uom}</td><td>{formatChargeRate(line.currency,line.unitRate)}<small>{line.currency==="USD"?`1 USD = ${line.exchangeRate} AED`:"1 AED = 1 AED"}</small></td><td>{money.format(Number(line.netAmountAed))}</td><td>{money.format(Number(line.vatAmountAed))}</td></tr>)}</tbody></table><div className="profit-summary"><span><small>Allocated customer income</small><b>{money.format(Number(selected.revenueAllocatedAed))}</b></span><span><small>Vendor expense before VAT</small><b>{money.format(Number(selected.subtotalAed))}</b></span><span className={Number(selected.profitAed)>=0?"positive":"negative"}><small>Gross profit</small><b>{money.format(Number(selected.profitAed))}</b></span></div>{canEdit&&<div className="form-actions"><button className="danger-link" onClick={onDelete}>Delete</button><button className="button" onClick={onEdit}>Edit vendor invoice</button></div>}</section>:<Panel title="Select a vendor invoice" sub="Review its expense and gross profit"><p className="empty-panel">Link vendor expenses to customer income to see job profitability.</p></Panel>}</div>
+    <div className="cost-layout"><Panel title="Vendor invoices" sub={`${bills.length} recorded expense${bills.length === 1 ? "" : "s"}`}><div className="invoice-list">{bills.map(bill=><button className={selected?.id===bill.id?"invoice selected":"invoice"} key={bill.id} onClick={()=>onOpen(bill.id)}><b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span><Tag text={vendorBillStatusLabel(bill.status)}/><strong>{money.format(Number(bill.totalAmountAed))}</strong></button>)}</div></Panel>
+    {selected?<section className="panel"><div className="panel-head"><div><h2>{selected.vendorInvoiceNumber}</h2><p>{selected.vendorName} · Job {selected.jobNumber}</p></div><Tag text={vendorBillStatusLabel(selected.status)}/></div>{selected.status==="DRAFT"&&<p className="status-explainer">Pending review means this older vendor invoice has not yet been approved. Verify its PDF and amount, then update its status to Approved.</p>}<div className="detail-grid"><Detail label="Vendor TRN" value={selected.vendorTrn||"—"}/><Detail label="Bill date" value={selected.billDate}/><Detail label="B/L number" value={selected.blNumber||"—"}/><div className="detail"><small>CUSTOMER INVOICE</small>{selected.customerInvoiceId?<button className="link-button" onClick={()=>onOpenInvoice(selected.customerInvoiceId!)}>{selected.customerInvoiceNumber}</button>:<b>Not linked</b>}</div><div className="detail"><small>VENDOR INVOICE PDF</small>{selected.sourceFilePath?<button className="link-button" onClick={()=>onOpenDocument(selected.sourceFilePath!)}>View {selected.sourceFileName}</button>:<b>Not uploaded</b>}</div></div><table className="charge-table"><thead><tr><th>Vendor service</th><th>Qty</th><th>Rate / FX</th><th>Cost AED</th><th>VAT</th></tr></thead><tbody>{selected.lines.map(line=><tr key={line.id}><td>{line.serviceName||line.description}<small>{line.description}</small></td><td>{line.quantity} {line.uom}</td><td>{formatChargeRate(line.currency,line.unitRate)}<small>{line.currency==="USD"?`1 USD = ${line.exchangeRate} AED`:"1 AED = 1 AED"}</small></td><td>{money.format(Number(line.netAmountAed))}</td><td>{money.format(Number(line.vatAmountAed))}</td></tr>)}</tbody></table><div className="profit-summary"><span><small>Allocated customer income</small><b>{money.format(Number(selected.revenueAllocatedAed))}</b></span><span><small>Vendor expense before VAT</small><b>{money.format(Number(selected.subtotalAed))}</b></span><span className={Number(selected.profitAed)>=0?"positive":"negative"}><small>Gross profit</small><b>{money.format(Number(selected.profitAed))}</b></span></div>{canEdit&&<div className="form-actions"><button className="danger-link" onClick={onDelete}>Delete</button><button className="button" onClick={onEdit}>{selected.status==="DRAFT"?"Review vendor invoice":"Edit vendor invoice"}</button></div>}</section>:<Panel title="Select a vendor invoice" sub="Review its expense and gross profit"><p className="empty-panel">Link vendor expenses to customer income to see job profitability.</p></Panel>}</div>
     <Panel title="Vendor master" sub={`${vendors.length} shipping and service vendor${vendors.length===1?"":"s"}`}><div className="record-list">{vendors.length?vendors.map(vendor=><div key={vendor.id}><span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn||"No TRN"}</small></span><Tag text={vendor.active?"ACTIVE":"INACTIVE"}/>{canEdit&&<button className="link-button" onClick={()=>onVendor(vendor)}>Edit</button>}</div>):<p className="empty-inline">Add the first vendor before recording a vendor invoice.</p>}</div></Panel>
   </>;
 }
@@ -3041,6 +3089,38 @@ function Modal({
           </button>
         </div>
         {children}
+      </section>
+    </div>
+  );
+}
+function ConfirmationDialog({
+  title,
+  message: description,
+  confirmLabel,
+  danger,
+  run,
+  cancel,
+}: Confirmation) {
+  return (
+    <div className="overlay confirmation-overlay">
+      <section
+        className="modal confirmation-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirmation-title"
+        aria-describedby="confirmation-description"
+      >
+        <div className={danger ? "confirmation-icon danger" : "confirmation-icon"}>
+          {danger ? "!" : "✓"}
+        </div>
+        <h2 id="confirmation-title">{title}</h2>
+        <p id="confirmation-description">{description}</p>
+        <div className="confirmation-actions">
+          <button className="soft" onClick={cancel}>Cancel</button>
+          <button className={danger ? "button danger-button" : "button"} onClick={() => void run()}>
+            {confirmLabel}
+          </button>
+        </div>
       </section>
     </div>
   );
