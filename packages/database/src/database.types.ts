@@ -1183,6 +1183,20 @@ export type Database = {
         Returns: boolean
       }
       issue_invoice: { Args: { p_invoice_id: string }; Returns: string }
+      save_job_charge: {
+        Args: {
+          p_currency_code: string
+          p_description: string
+          p_exchange_rate: number
+          p_job_id: string
+          p_job_service_id: string
+          p_quantity: number
+          p_tax_rate_id: string
+          p_unit_rate: number
+          p_uom: string
+        }
+        Returns: string
+      }
       update_job: {
         Args: {
           p_branch_id: string

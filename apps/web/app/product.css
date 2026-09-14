@@ -11,3 +11,5 @@
 
 .service-choice{width:100%;color:inherit;font:inherit;text-align:left}
 .service-choice:focus-visible{outline:3px solid rgba(23,139,166,.24);outline-offset:2px}
+.charge-preview{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:16px;padding:12px;background:#eef7f8;border:1px solid #cfe8ec;border-radius:10px}.charge-preview span{display:grid;gap:4px;min-width:0}.charge-preview small{color:var(--muted);font-size:10px}.charge-preview b{font-size:13px;overflow-wrap:anywhere}.charge-preview span:last-child{color:#126f86}
+@media(max-width:600px){.charge-preview{grid-template-columns:repeat(2,minmax(0,1fr))}}
