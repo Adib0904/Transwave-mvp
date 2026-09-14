@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import type { Customer, MasterData, Port, SaveCustomer, SavePort, SaveService } from "@transwave/contracts";
+import type { Customer, MasterData, Port, SaveCustomer, SavePort, SaveService, SaveVendor, Vendor } from "@transwave/contracts";
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal } from "../common/format.js";
@@ -8,31 +8,56 @@ import { requireTenantRole, resolveTenant } from "../common/tenant.js";
 type CustomerRow = Database["public"]["Tables"]["customers"]["Row"];
 type PortRow = Database["public"]["Tables"]["ports"]["Row"];
 type ServiceRow = Database["public"]["Tables"]["services"]["Row"];
+type VendorRow = Database["public"]["Tables"]["vendors"]["Row"];
 const mapCustomer = (row: CustomerRow): Customer => ({ id: row.id, code: row.customer_code, name: row.company_name, trn: row.trn, email: row.email, phone: row.phone, billingAddress: row.billing_address, defaultCurrency: row.default_currency, paymentTermsDays: row.payment_terms_days, active: row.active });
 const mapPort = (row: PortRow, companyId: string): Port => ({ id: row.id, unLocode: row.un_locode?.trim() || null, name: row.name, countryCode: row.country_code.trim(), active: row.active, editable: row.company_id === companyId });
 const mapService = (row: ServiceRow) => ({ id: row.id, code: row.code, name: row.name, defaultUom: row.default_uom, defaultCurrency: row.default_currency, defaultTaxRateId: row.default_tax_rate_id, active: row.active });
+const mapVendor = (row: VendorRow): Vendor => ({ id: row.id, code: row.vendor_code, name: row.legal_name, trn: row.trn, email: row.email, phone: row.phone, address: row.address, defaultCurrency: row.default_currency.trim(), paymentTermsDays: row.payment_terms_days, active: row.active });
 
 @Injectable()
 export class MastersService {
   async list(database: TransWaveDatabaseClient, userId: string): Promise<MasterData> {
     const tenant = await resolveTenant(database, userId);
-    const [customers, ports, services, taxRates, branches, currencies] = await Promise.all([
+    const [customers, vendors, ports, services, taxRates, branches, currencies] = await Promise.all([
       database.from("customers").select("*").order("company_name"),
+      database.from("vendors").select("*").order("legal_name"),
       database.from("ports").select("*").order("name"),
       database.from("services").select("*").order("name"),
       database.from("tax_rates").select("id, code, rate").order("rate"),
       database.from("branches").select("id, code, name, active").order("code"),
       database.from("currencies").select("code").order("code")
     ]);
-    for (const result of [customers, ports, services, taxRates, branches, currencies]) if (result.error) throwDatabaseError(result.error);
+    for (const result of [customers, vendors, ports, services, taxRates, branches, currencies]) if (result.error) throwDatabaseError(result.error);
     return {
       customers: (customers.data ?? []).map(mapCustomer),
+      vendors: (vendors.data ?? []).map(mapVendor),
       ports: (ports.data ?? []).map(row => mapPort(row, tenant.companyId)),
       services: (services.data ?? []).map(mapService),
       taxRates: (taxRates.data ?? []).map(row => ({ id: row.id, code: row.code, rate: decimal(row.rate) })),
       branches: branches.data ?? [],
       currencies: (currencies.data ?? []).map(row => row.code.trim())
     };
+  }
+
+  async createVendor(database: TransWaveDatabaseClient, userId: string, input: SaveVendor) {
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    const result = await database.from("vendors").insert({ company_id: tenant.companyId, legal_name: input.name, trn: input.trn, email: input.email, phone: input.phone, address: input.address, default_currency: input.defaultCurrency, payment_terms_days: input.paymentTermsDays, active: input.active }).select("*").single();
+    return mapVendor(requireData(result.data, result.error, "Vendor was not created"));
+  }
+
+  async updateVendor(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SaveVendor>) {
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    const values: Database["public"]["Tables"]["vendors"]["Update"] = {};
+    if (input.name !== undefined) values.legal_name = input.name;
+    if (input.trn !== undefined) values.trn = input.trn;
+    if (input.email !== undefined) values.email = input.email;
+    if (input.phone !== undefined) values.phone = input.phone;
+    if (input.address !== undefined) values.address = input.address;
+    if (input.defaultCurrency !== undefined) values.default_currency = input.defaultCurrency;
+    if (input.paymentTermsDays !== undefined) values.payment_terms_days = input.paymentTermsDays;
+    if (input.active !== undefined) values.active = input.active;
+    const result = await database.from("vendors").update(values).eq("id", id).eq("company_id", tenant.companyId).select("*").maybeSingle();
+    return mapVendor(requireData(result.data, result.error, "Vendor not found"));
   }
 
   async createCustomer(database: TransWaveDatabaseClient, userId: string, input: SaveCustomer) {

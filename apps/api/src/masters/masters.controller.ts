@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import { saveCustomerSchema, savePortSchema, saveServiceSchema, type SaveCustomer, type SavePort, type SaveService } from "@transwave/contracts";
+import { saveCustomerSchema, savePortSchema, saveServiceSchema, saveVendorSchema, type SaveCustomer, type SavePort, type SaveService, type SaveVendor } from "@transwave/contracts";
 import { SupabaseAuthGuard } from "../auth/supabase-auth.guard.js";
 import type { AuthenticatedRequest } from "../auth/authenticated-request.js";
 import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
@@ -15,6 +15,8 @@ export class MastersController {
   @Get() list(@Req() request: AuthenticatedRequest) { return this.masters.list(request.database, request.auth.userId); }
   @Post("customers") createCustomer(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveCustomerSchema)) input: SaveCustomer) { return this.masters.createCustomer(request.database, request.auth.userId, input); }
   @Patch("customers/:id") updateCustomer(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveCustomerSchema.partial())) input: Partial<SaveCustomer>) { return this.masters.updateCustomer(request.database, request.auth.userId, id, input); }
+  @Post("vendors") createVendor(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveVendorSchema)) input: SaveVendor) { return this.masters.createVendor(request.database, request.auth.userId, input); }
+  @Patch("vendors/:id") updateVendor(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveVendorSchema.partial())) input: Partial<SaveVendor>) { return this.masters.updateVendor(request.database, request.auth.userId, id, input); }
   @Post("ports") createPort(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(savePortSchema)) input: SavePort) { return this.masters.createPort(request.database, request.auth.userId, input); }
   @Patch("ports/:id") updatePort(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(savePortSchema.partial())) input: Partial<SavePort>) { return this.masters.updatePort(request.database, request.auth.userId, id, input); }
   @Post("services") createService(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveServiceSchema)) input: SaveService) { return this.masters.createService(request.database, request.auth.userId, input); }

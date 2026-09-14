@@ -1105,6 +1105,237 @@ export type Database = {
           },
         ]
       }
+      vendor_bill_lines: {
+        Row: {
+          company_id: string
+          created_at: string
+          currency_code: string
+          description: string
+          exchange_rate: number
+          id: string
+          line_number: number
+          net_amount_aed: number | null
+          quantity: number
+          service_id: string | null
+          tax_rate: number
+          total_amount_aed: number | null
+          unit_rate: number
+          uom: string
+          vat_amount_aed: number | null
+          vendor_bill_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          currency_code: string
+          description: string
+          exchange_rate: number
+          id?: string
+          line_number: number
+          net_amount_aed?: number | null
+          quantity: number
+          service_id?: string | null
+          tax_rate?: number
+          total_amount_aed?: number | null
+          unit_rate: number
+          uom: string
+          vat_amount_aed?: number | null
+          vendor_bill_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          currency_code?: string
+          description?: string
+          exchange_rate?: number
+          id?: string
+          line_number?: number
+          net_amount_aed?: number | null
+          quantity?: number
+          service_id?: string | null
+          tax_rate?: number
+          total_amount_aed?: number | null
+          unit_rate?: number
+          uom?: string
+          vat_amount_aed?: number | null
+          vendor_bill_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_bill_lines_currency_code_fkey"
+            columns: ["currency_code"]
+            isOneToOne: false
+            referencedRelation: "currencies"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "vendor_bill_lines_service_id_company_id_fkey"
+            columns: ["service_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_bill_lines_vendor_bill_id_company_id_fkey"
+            columns: ["vendor_bill_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_bills"
+            referencedColumns: ["id", "company_id"]
+          },
+        ]
+      }
+      vendor_bills: {
+        Row: {
+          bill_date: string
+          bl_number: string | null
+          company_id: string
+          created_at: string
+          customer_invoice_id: string | null
+          date_of_supply: string | null
+          department: string | null
+          due_date: string | null
+          id: string
+          job_id: string
+          remarks: string | null
+          revenue_allocated_aed: number
+          source_file_name: string | null
+          status: string
+          updated_at: string
+          vendor_id: string
+          vendor_invoice_number: string
+        }
+        Insert: {
+          bill_date: string
+          bl_number?: string | null
+          company_id: string
+          created_at?: string
+          customer_invoice_id?: string | null
+          date_of_supply?: string | null
+          department?: string | null
+          due_date?: string | null
+          id?: string
+          job_id: string
+          remarks?: string | null
+          revenue_allocated_aed?: number
+          source_file_name?: string | null
+          status?: string
+          updated_at?: string
+          vendor_id: string
+          vendor_invoice_number: string
+        }
+        Update: {
+          bill_date?: string
+          bl_number?: string | null
+          company_id?: string
+          created_at?: string
+          customer_invoice_id?: string | null
+          date_of_supply?: string | null
+          department?: string | null
+          due_date?: string | null
+          id?: string
+          job_id?: string
+          remarks?: string | null
+          revenue_allocated_aed?: number
+          source_file_name?: string | null
+          status?: string
+          updated_at?: string
+          vendor_id?: string
+          vendor_invoice_number?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_bills_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_bills_customer_invoice_id_company_id_fkey"
+            columns: ["customer_invoice_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_bills_job_id_company_id_fkey"
+            columns: ["job_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_bills_vendor_id_company_id_fkey"
+            columns: ["vendor_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id", "company_id"]
+          },
+        ]
+      }
+      vendors: {
+        Row: {
+          active: boolean
+          address: string | null
+          company_id: string
+          created_at: string
+          default_currency: string
+          email: string | null
+          id: string
+          legal_name: string
+          payment_terms_days: number
+          phone: string | null
+          trn: string | null
+          updated_at: string
+          vendor_code: string
+        }
+        Insert: {
+          active?: boolean
+          address?: string | null
+          company_id: string
+          created_at?: string
+          default_currency?: string
+          email?: string | null
+          id?: string
+          legal_name: string
+          payment_terms_days?: number
+          phone?: string | null
+          trn?: string | null
+          updated_at?: string
+          vendor_code?: string
+        }
+        Update: {
+          active?: boolean
+          address?: string | null
+          company_id?: string
+          created_at?: string
+          default_currency?: string
+          email?: string | null
+          id?: string
+          legal_name?: string
+          payment_terms_days?: number
+          phone?: string | null
+          trn?: string | null
+          updated_at?: string
+          vendor_code?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendors_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendors_default_currency_fkey"
+            columns: ["default_currency"]
+            isOneToOne: false
+            referencedRelation: "currencies"
+            referencedColumns: ["code"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -1171,6 +1402,7 @@ export type Database = {
         }
         Returns: string
       }
+      delete_vendor_bill: { Args: { p_id: string }; Returns: undefined }
       has_company_role: {
         Args: {
           allowed_roles: Database["public"]["Enums"]["company_role"][]
@@ -1194,6 +1426,26 @@ export type Database = {
           p_tax_rate_id: string
           p_unit_rate: number
           p_uom: string
+        }
+        Returns: string
+      }
+      save_vendor_bill: {
+        Args: {
+          p_bill_date: string
+          p_bl_number: string
+          p_customer_invoice_id: string
+          p_date_of_supply: string
+          p_department: string
+          p_due_date: string
+          p_id: string
+          p_job_id: string
+          p_lines: Json
+          p_remarks: string
+          p_revenue_allocated_aed: number
+          p_source_file_name: string
+          p_status: string
+          p_vendor_id: string
+          p_vendor_invoice_number: string
         }
         Returns: string
       }

@@ -1,5 +1,26 @@
 import { createClient, type Session } from "@supabase/supabase-js";
-import type { Customer, Invoice, JobDetail, JobSummary, MasterData, Port, SaveContainer, SaveCustomer, SaveJob, SavePort, SaveService, UserContext, CreateCharge, ManagedUser, CreateManagedUser, UpdateManagedUser } from "@transwave/contracts";
+import type {
+  CreateCharge,
+  CreateManagedUser,
+  Customer,
+  Invoice,
+  JobDetail,
+  JobSummary,
+  ManagedUser,
+  MasterData,
+  Port,
+  SaveContainer,
+  SaveCustomer,
+  SaveJob,
+  SavePort,
+  SaveService,
+  SaveVendor,
+  SaveVendorBill,
+  UpdateManagedUser,
+  UserContext,
+  Vendor,
+  VendorBill,
+} from "@transwave/contracts";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -34,6 +55,8 @@ export const api = {
   masters: (s: Session) => call<MasterData>(s, "/masters"),
   createCustomer: (s: Session, value: SaveCustomer) => call<Customer>(s, "/masters/customers", { method: "POST", body: JSON.stringify(value) }),
   updateCustomer: (s: Session, id: string, value: Partial<SaveCustomer>) => call<Customer>(s, `/masters/customers/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
+  createVendor: (s: Session, value: SaveVendor) => call<Vendor>(s, "/masters/vendors", { method: "POST", body: JSON.stringify(value) }),
+  updateVendor: (s: Session, id: string, value: Partial<SaveVendor>) => call<Vendor>(s, `/masters/vendors/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
   createPort: (s: Session, value: SavePort) => call<Port>(s, "/masters/ports", { method: "POST", body: JSON.stringify(value) }),
   updatePort: (s: Session, id: string, value: Partial<SavePort>) => call<Port>(s, `/masters/ports/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
   createService: (s: Session, value: SaveService) => call(s, "/masters/services", { method: "POST", body: JSON.stringify(value) }),
@@ -49,8 +72,13 @@ export const api = {
   invoices: (s: Session) => call<Invoice[]>(s, "/invoices"),
   invoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}`),
   createDraft: (s: Session, jobId: string, chargeIds: string[]) => call<Invoice>(s, "/invoices/drafts", { method: "POST", body: JSON.stringify({ jobId, chargeIds }) }),
-  issueInvoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}/issue`, { method: "POST" })
-  ,users: (s: Session) => call<ManagedUser[]>(s, "/users")
-  ,createUser: (s: Session, value: CreateManagedUser) => call<ManagedUser>(s, "/users", { method: "POST", body: JSON.stringify(value) })
-  ,updateUser: (s: Session, id: string, value: UpdateManagedUser) => call<ManagedUser>(s, `/users/${id}`, { method: "PATCH", body: JSON.stringify(value) })
+  issueInvoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}/issue`, { method: "POST" }),
+  vendorBills: (s: Session) => call<VendorBill[]>(s, "/vendor-bills"),
+  vendorBill: (s: Session, id: string) => call<VendorBill>(s, `/vendor-bills/${id}`),
+  createVendorBill: (s: Session, value: SaveVendorBill) => call<VendorBill>(s, "/vendor-bills", { method: "POST", body: JSON.stringify(value) }),
+  updateVendorBill: (s: Session, id: string, value: SaveVendorBill) => call<VendorBill>(s, `/vendor-bills/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
+  removeVendorBill: (s: Session, id: string) => call<void>(s, `/vendor-bills/${id}`, { method: "DELETE" }),
+  users: (s: Session) => call<ManagedUser[]>(s, "/users"),
+  createUser: (s: Session, value: CreateManagedUser) => call<ManagedUser>(s, "/users", { method: "POST", body: JSON.stringify(value) }),
+  updateUser: (s: Session, id: string, value: UpdateManagedUser) => call<ManagedUser>(s, `/users/${id}`, { method: "PATCH", body: JSON.stringify(value) })
 };

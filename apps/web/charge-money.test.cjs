@@ -13,6 +13,12 @@ assert.deepEqual(chargeAmounts(2, 100, 3.6725, 5), {
   vatAed: 36.73,
   totalAed: 771.23
 });
+assert.deepEqual(chargeAmounts(4, 2000, 3.685, 0), {
+  foreignAmount: 8000,
+  netAed: 29480,
+  vatAed: 0,
+  totalAed: 29480
+});
 assert.deepEqual(chargeAmounts(3, 50, 1, 0), {
   foreignAmount: 150,
   netAed: 150,

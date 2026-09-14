@@ -14,6 +14,10 @@ import type {
   ManagedUser,
   CreateManagedUser,
   UpdateManagedUser,
+  SaveVendor,
+  SaveVendorBill,
+  Vendor,
+  VendorBill,
 } from "@transwave/contracts";
 import { api } from "./api";
 import { useAuth } from "./auth";
@@ -37,6 +41,7 @@ type NavigationPage =
   | "Customers"
   | "Jobs"
   | "Invoices"
+  | "Costs"
   | "Masters"
   | "Users";
 type Page = NavigationPage | "New Job";
@@ -49,6 +54,8 @@ type Dialog =
   | "port"
   | "service"
   | "user"
+  | "vendor"
+  | "vendorBill"
   | null;
 type AssignedService = JobDetail["services"][number];
 const money = new Intl.NumberFormat("en-AE", {
@@ -60,6 +67,7 @@ const icons: Record<NavigationPage, string> = {
   Customers: "◎",
   Jobs: "▣",
   Invoices: "◫",
+  Costs: "◇",
   Masters: "⚙",
   Users: "♙",
 };
@@ -97,6 +105,8 @@ export function Workspace() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [selectedJob, setSelectedJob] = useState<JobDetail | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [vendorBills, setVendorBills] = useState<VendorBill[]>([]);
+  const [selectedVendorBill, setSelectedVendorBill] = useState<VendorBill | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingPort, setEditingPort] = useState<Port | null>(null);
@@ -105,6 +115,7 @@ export function Workspace() {
   >(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
+  const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [chargeService, setChargeService] = useState<{
     service: AssignedService;
     charge?: Charge;
@@ -124,11 +135,12 @@ export function Workspace() {
     setBusy(true);
     setError("");
     try {
-      const [nextMasters, nextJobs, nextInvoices, nextUsers] =
+      const [nextMasters, nextJobs, nextInvoices, nextVendorBills, nextUsers] =
         await Promise.all([
           api.masters(session),
           api.jobs(session),
           api.invoices(session),
+          api.vendorBills(session),
           user && ["OWNER", "ADMIN"].includes(user.role)
             ? api.users(session)
             : Promise.resolve([]),
@@ -136,6 +148,7 @@ export function Workspace() {
       setMasters(nextMasters);
       setJobs(nextJobs);
       setInvoices(nextInvoices);
+      setVendorBills(nextVendorBills);
       setSelectedJob((current) =>
         current && nextJobs.some((job) => job.id === current.id)
           ? current
@@ -174,6 +187,18 @@ export function Workspace() {
     try {
       setSelectedInvoice(await api.invoice(session, id));
       setPage("Invoices");
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function openVendorBill(id: string) {
+    if (!session) return;
+    setBusy(true);
+    try {
+      setSelectedVendorBill(await api.vendorBill(session, id));
+      setPage("Costs");
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -297,6 +322,16 @@ export function Workspace() {
                 + New job
               </button>
             )}
+            {page === "Costs" && canManageBilling && (
+              <>
+                <button className="soft" onClick={() => { setEditingVendor(null); setDialog("vendor"); }}>
+                  + Vendor
+                </button>
+                <button className="button" onClick={() => { setSelectedVendorBill(null); setDialog("vendorBill"); }}>
+                  + Vendor invoice
+                </button>
+              </>
+            )}
           </div>
         </header>
         {error && (
@@ -384,6 +419,19 @@ export function Workspace() {
                 setSelectedInvoice,
               )
             }
+          />
+        )}
+        {page === "Costs" && (
+          <Costs
+            bills={vendorBills}
+            vendors={masters.vendors}
+            selected={selectedVendorBill}
+            canEdit={canManageBilling}
+            onOpen={openVendorBill}
+            onEdit={() => setDialog("vendorBill")}
+            onDelete={() => selectedVendorBill && void act(() => api.removeVendorBill(session, selectedVendorBill.id), () => setSelectedVendorBill(null))}
+            onVendor={(vendor) => { setEditingVendor(vendor); setDialog("vendor"); }}
+            onOpenInvoice={openInvoice}
           />
         )}
         {page === "Masters" && (
@@ -553,6 +601,24 @@ export function Workspace() {
                 : api.createUser(session, input as CreateManagedUser),
             )
           }
+        />
+      )}
+      {dialog === "vendor" && (
+        <VendorDialog
+          initial={editingVendor}
+          close={() => setDialog(null)}
+          save={(input) => void act(() => editingVendor ? api.updateVendor(session, editingVendor.id, input) : api.createVendor(session, input))}
+        />
+      )}
+      {dialog === "vendorBill" && (
+        <VendorBillDialog
+          initial={selectedVendorBill}
+          data={masters}
+          jobs={jobs}
+          invoices={invoices}
+          bills={vendorBills}
+          close={() => setDialog(null)}
+          save={(input) => void act(() => selectedVendorBill ? api.updateVendorBill(session, selectedVendorBill.id, input) : api.createVendorBill(session, input), setSelectedVendorBill)}
         />
       )}
     </main>
@@ -1076,6 +1142,48 @@ function Invoices({
       )}
     </div>
   );
+}
+
+function Costs({ bills, vendors, selected, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice }: { bills: VendorBill[]; vendors: Vendor[]; selected: VendorBill | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void }) {
+  const revenue = bills.reduce((sum, bill) => sum + Number(bill.revenueAllocatedAed), 0);
+  const expense = bills.reduce((sum, bill) => sum + Number(bill.subtotalAed), 0);
+  const profit = revenue - expense;
+  const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+  return <>
+    <div className="metrics cost-metrics"><Metric label="Allocated income" value={money.format(revenue)} note="Customer revenue before VAT"/><Metric label="Vendor expense" value={money.format(expense)} note="Vendor cost before VAT"/><Metric label="Gross profit" value={money.format(profit)} note="Income minus vendor expense" good={profit >= 0}/><Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0}/></div>
+    <div className="cost-layout"><Panel title="Vendor invoices" sub={`${bills.length} recorded expense${bills.length === 1 ? "" : "s"}`}><div className="invoice-list">{bills.map(bill=><button className={selected?.id===bill.id?"invoice selected":"invoice"} key={bill.id} onClick={()=>onOpen(bill.id)}><b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span><Tag text={bill.status}/><strong>{money.format(Number(bill.totalAmountAed))}</strong></button>)}</div></Panel>
+    {selected?<section className="panel"><div className="panel-head"><div><h2>{selected.vendorInvoiceNumber}</h2><p>{selected.vendorName} · Job {selected.jobNumber}</p></div><Tag text={selected.status}/></div><div className="detail-grid"><Detail label="Vendor TRN" value={selected.vendorTrn||"—"}/><Detail label="Bill date" value={selected.billDate}/><Detail label="B/L number" value={selected.blNumber||"—"}/><div className="detail"><small>CUSTOMER INVOICE</small>{selected.customerInvoiceId?<button className="link-button" onClick={()=>onOpenInvoice(selected.customerInvoiceId!)}>{selected.customerInvoiceNumber}</button>:<b>Not linked</b>}</div><Detail label="Source document" value={selected.sourceFileName||"Not recorded"}/></div><table className="charge-table"><thead><tr><th>Vendor service</th><th>Qty</th><th>Rate / FX</th><th>Cost AED</th><th>VAT</th></tr></thead><tbody>{selected.lines.map(line=><tr key={line.id}><td>{line.serviceName||line.description}<small>{line.description}</small></td><td>{line.quantity} {line.uom}</td><td>{formatChargeRate(line.currency,line.unitRate)}<small>{line.currency==="USD"?`1 USD = ${line.exchangeRate} AED`:"1 AED = 1 AED"}</small></td><td>{money.format(Number(line.netAmountAed))}</td><td>{money.format(Number(line.vatAmountAed))}</td></tr>)}</tbody></table><div className="profit-summary"><span><small>Allocated customer income</small><b>{money.format(Number(selected.revenueAllocatedAed))}</b></span><span><small>Vendor expense before VAT</small><b>{money.format(Number(selected.subtotalAed))}</b></span><span className={Number(selected.profitAed)>=0?"positive":"negative"}><small>Gross profit</small><b>{money.format(Number(selected.profitAed))}</b></span></div>{canEdit&&<div className="form-actions"><button className="danger-link" onClick={onDelete}>Delete</button><button className="button" onClick={onEdit}>Edit vendor invoice</button></div>}</section>:<Panel title="Select a vendor invoice" sub="Review its expense and gross profit"><p className="empty-panel">Link vendor expenses to customer income to see job profitability.</p></Panel>}</div>
+    <Panel title="Vendor master" sub={`${vendors.length} shipping and service vendor${vendors.length===1?"":"s"}`}><div className="record-list">{vendors.length?vendors.map(vendor=><div key={vendor.id}><span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn||"No TRN"}</small></span><Tag text={vendor.active?"ACTIVE":"INACTIVE"}/>{canEdit&&<button className="link-button" onClick={()=>onVendor(vendor)}>Edit</button>}</div>):<p className="empty-inline">Add the first vendor before recording a vendor invoice.</p>}</div></Panel>
+  </>;
+}
+
+type VendorBillLineDraft = SaveVendorBill["lines"][number] & { key: string };
+const newVendorBillLine = (): VendorBillLineDraft => ({ key: crypto.randomUUID(), serviceId: null, description: "", quantity: "1", uom: "JOB", currency: "USD", exchangeRate: "3.685", unitRate: "0", taxRate: "0" });
+
+function VendorDialog({initial,close,save}:{initial:Vendor|null;close():void;save(value:SaveVendor):void}) { return <Modal title={initial?"Edit vendor":"Add vendor"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),address:nullable(d,"address"),defaultCurrency:String(d.get("currency")) as "AED"|"USD",paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Vendor ID</span><b>{initial?.code||"Created automatically"}</b><small>Vendor invoices and costs remain linked to this record.</small></div><Field label="Legal name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="TRN / VAT number"><input name="trn" defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Address"><textarea name="address" rows={3} defaultValue={initial?.address||""}/></Field><div className="three"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Default currency"><select name="currency" defaultValue={initial?.defaultCurrency||"AED"}><option>AED</option><option>USD</option></select></Field><Field label="Payment terms"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field></div><FormButtons label="Save vendor" close={close}/></form></Modal>; }
+
+function VendorBillDialog({initial,data,jobs,invoices,bills,close,save}:{initial:VendorBill|null;data:MasterData;jobs:JobSummary[];invoices:Invoice[];bills:VendorBill[];close():void;save(value:SaveVendorBill):void}) {
+  const [jobId,setJobId]=useState(initial?.jobId||"");
+  const [customerInvoiceId,setCustomerInvoiceId]=useState(initial?.customerInvoiceId||"");
+  const [revenue,setRevenue]=useState(initial?.revenueAllocatedAed||"0.00");
+  const [lines,setLines]=useState<VendorBillLineDraft[]>(initial?.lines.map(line=>({key:line.id,serviceId:line.serviceId,description:line.description,quantity:line.quantity,uom:line.uom,currency:line.currency as "AED"|"USD",exchangeRate:line.exchangeRate,unitRate:line.unitRate,taxRate:line.taxRate}))||[newVendorBillLine()]);
+  const jobOptions = Array.from(new Map([
+    ...jobs.map(job => [job.id, { id: job.id, jobNumber: job.jobNumber, customerName: job.customerName }] as const),
+    ...invoices.map(invoice => [invoice.jobId, { id: invoice.jobId, jobNumber: invoice.jobNumber, customerName: invoice.customerName }] as const),
+  ]).values());
+  const availableInvoices=invoices.filter(invoice=>invoice.jobId===jobId);
+  const remainingRevenue = (invoiceId: string) => {
+    const invoice = invoices.find(item => item.id === invoiceId);
+    const used = bills
+      .filter(bill => bill.customerInvoiceId === invoiceId && bill.id !== initial?.id)
+      .reduce((sum, bill) => sum + Number(bill.revenueAllocatedAed), 0);
+    return Math.max(0, Number(invoice?.subtotal ?? 0) - used);
+  };
+  const expense=lines.reduce((sum,line)=>sum+chargeAmounts(Number(line.quantity)||0,Number(line.unitRate)||0,line.currency==="AED"?1:Number(line.exchangeRate)||0,Number(line.taxRate)||0).netAed,0);
+  const updateLine=(key:string,values:Partial<VendorBillLineDraft>)=>setLines(current=>current.map(line=>line.key===key?{...line,...values}:line));
+  return <Modal title={initial?"Edit vendor invoice":"Record vendor invoice"} wide close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({vendorId:String(d.get("vendor")),jobId,customerInvoiceId:customerInvoiceId||null,vendorInvoiceNumber:String(d.get("number")),billDate:String(d.get("billDate")),dueDate:String(d.get("dueDate"))||null,dateOfSupply:String(d.get("supplyDate"))||null,blNumber:nullable(d,"bl"),department:nullable(d,"department"),remarks:nullable(d,"remarks"),sourceFileName:nullable(d,"sourceFile"),status:String(d.get("status")) as SaveVendorBill["status"],revenueAllocatedAed:revenue,lines:lines.map(({key,...line})=>line)})}}><FormSection title="Vendor invoice" note="Supplier, job and source reference"><div className="three"><Field label="Vendor"><select name="vendor" required defaultValue={initial?.vendorId||""}><option value="">Select vendor</option>{data.vendors.filter(v=>v.active||v.id===initial?.vendorId).map(v=><option value={v.id} key={v.id}>{v.name} · {v.code}</option>)}</select></Field><Field label="Job"><select name="job" required value={jobId} onChange={event=>{setJobId(event.target.value);setCustomerInvoiceId("");setRevenue("0.00")}}><option value="">Select job</option>{jobOptions.map(job=><option value={job.id} key={job.id}>{job.jobNumber} · {job.customerName}</option>)}</select></Field><Field label="Vendor invoice no."><input name="number" required defaultValue={initial?.vendorInvoiceNumber}/></Field></div><div className="three"><Field label="Invoice date"><input name="billDate" type="date" required defaultValue={initial?.billDate||new Date().toISOString().slice(0,10)}/></Field><Field label="Date of supply"><input name="supplyDate" type="date" defaultValue={initial?.dateOfSupply||""}/></Field><Field label="Due date"><input name="dueDate" type="date" defaultValue={initial?.dueDate||""}/></Field></div><div className="three"><Field label="B/L number"><input name="bl" defaultValue={initial?.blNumber||""}/></Field><Field label="Department"><input name="department" defaultValue={initial?.department||""}/></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"DRAFT"}><option>DRAFT</option><option>APPROVED</option><option>PAID</option></select></Field></div><Field label="Source PDF filename"><input name="sourceFile" defaultValue={initial?.sourceFileName||""} placeholder="OTSDXB260700096 INV.pdf"/><small className="input-help">Reference to the original vendor document.</small></Field></FormSection>
+  <FormSection title="Expense lines" note="Amounts are converted and reported in AED"><div className="vendor-line-head"><span>Description / service</span><span>Qty / unit</span><span>Currency / FX</span><span>Rate</span><span>VAT %</span></div>{lines.map((line,index)=><div className="vendor-line" key={line.key}><div><select aria-label={`Line ${index+1} service`} value={line.serviceId||""} onChange={event=>{const service=data.services.find(item=>item.id===event.target.value);updateLine(line.key,{serviceId:event.target.value||null,description:line.description||service?.name||"",uom:line.uom||service?.defaultUom||"JOB"})}}><option value="">Other expense</option>{data.services.map(service=><option value={service.id} key={service.id}>{service.name}</option>)}</select><input aria-label={`Line ${index+1} description`} required value={line.description} onChange={event=>updateLine(line.key,{description:event.target.value})} placeholder="Ocean freight"/></div><div><input aria-label={`Line ${index+1} quantity`} required type="number" min="0.001" step="0.001" value={line.quantity} onChange={event=>updateLine(line.key,{quantity:event.target.value})}/><input aria-label={`Line ${index+1} unit`} required value={line.uom} onChange={event=>updateLine(line.key,{uom:event.target.value})}/></div><div><select aria-label={`Line ${index+1} currency`} value={line.currency} onChange={event=>updateLine(line.key,{currency:event.target.value as "AED"|"USD",exchangeRate:event.target.value==="AED"?"1":"3.685"})}><option>AED</option><option>USD</option></select><input aria-label={`Line ${index+1} exchange rate`} required type="number" min="0.00000001" step="0.00000001" disabled={line.currency==="AED"} value={line.currency==="AED"?"1":line.exchangeRate} onChange={event=>updateLine(line.key,{exchangeRate:event.target.value})}/></div><input aria-label={`Line ${index+1} rate`} required type="number" min="0" step="0.01" value={line.unitRate} onChange={event=>updateLine(line.key,{unitRate:event.target.value})}/><div><input aria-label={`Line ${index+1} VAT`} required type="number" min="0" step="0.01" value={line.taxRate} onChange={event=>updateLine(line.key,{taxRate:event.target.value})}/><button className="danger-link" type="button" disabled={lines.length===1} onClick={()=>setLines(current=>current.filter(item=>item.key!==line.key))}>Remove</button></div></div>)}<button className="link-button" type="button" onClick={()=>setLines(current=>[...current,newVendorBillLine()])}>+ Add expense line</button><div className="dialog-total"><span>Vendor expense before VAT</span><b>{money.format(expense)}</b></div></FormSection>
+  <FormSection title="Income link and profit" note="Allocate customer revenue once across vendor invoices"><div className="two"><Field label="Customer invoice"><select name="customerInvoice" value={customerInvoiceId} onChange={event=>{const id=event.target.value;setCustomerInvoiceId(id);setRevenue(id?remainingRevenue(id).toFixed(2):"0.00")}}><option value="">Not linked yet</option>{availableInvoices.map(invoice=><option value={invoice.id} key={invoice.id}>{invoice.invoiceNumber||invoice.draftReference} · {money.format(remainingRevenue(invoice.id))} available</option>)}</select></Field><Field label="Revenue allocated (AED, before VAT)"><input name="revenue" required type="number" min="0" max={customerInvoiceId?remainingRevenue(customerInvoiceId):0} step="0.01" value={revenue} onChange={event=>setRevenue(event.target.value)}/></Field></div><div className="profit-preview"><span>Allocated income <b>{money.format(Number(revenue)||0)}</b></span><span>Vendor expense <b>{money.format(expense)}</b></span><strong className={(Number(revenue)||0)-expense>=0?"positive":"negative"}>Gross profit <b>{money.format((Number(revenue)||0)-expense)}</b></strong></div><Field label="Remarks"><textarea name="remarks" rows={2} defaultValue={initial?.remarks||""}/></Field></FormSection><FormButtons label={initial?"Update vendor invoice":"Save vendor invoice"} close={close} disabled={!data.vendors.length||!jobId||!lines.every(line=>line.description)}/></form></Modal>;
 }
 
 function Masters({
@@ -1979,7 +2087,7 @@ function ChargeDialog({
         ? "1"
         : item.charge?.currency === "USD"
           ? item.charge.exchangeRate
-          : "3.6725",
+          : "3.685",
     );
   };
   return (

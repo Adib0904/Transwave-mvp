@@ -71,6 +71,7 @@ export class InvoicesService {
       customerTrn: invoice.customer_trn_snapshot,
       customerAddress: invoice.customer_address_snapshot,
       paymentTermsDays: invoice.payment_terms_days_snapshot,
+      jobId: invoice.job_id,
       jobNumber: invoice.job_number_snapshot,
       polName: invoice.pol_snapshot,
       podName: invoice.pod_snapshot,

@@ -46,6 +46,16 @@ const safeMessages: Record<string, string> = {
     "Select a container equipment type before entering container numbers",
   INVALID_CONTAINER_NUMBERS:
     "Use a valid unique container number such as MSCU1234567",
+  INVALID_VENDOR: "Select an active vendor from this company",
+  INVALID_VENDOR_BILL_STATUS: "Select a valid vendor bill status",
+  VENDOR_BILL_LINES_REQUIRED: "Add at least one vendor invoice line",
+  VENDOR_BILL_NOT_FOUND: "Vendor bill not found",
+  CUSTOMER_INVOICE_JOB_MISMATCH:
+    "The selected customer invoice belongs to another job",
+  CUSTOMER_INVOICE_REQUIRED_FOR_REVENUE:
+    "Select a customer invoice before allocating revenue",
+  REVENUE_ALLOCATION_EXCEEDS_INVOICE:
+    "Allocated revenue exceeds the remaining customer invoice subtotal",
 };
 
 export function throwDatabaseError(

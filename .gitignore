@@ -19,5 +19,6 @@ supabase/.temp/
 awesome-artifacts/
 evidence/
 output/
+tmp/
 apps/web/AGENTS.md
 apps/web/CLAUDE.md

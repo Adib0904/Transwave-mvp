@@ -95,6 +95,32 @@ export const saveCustomerSchema = z.object({
   active: z.boolean().default(true),
 });
 
+export const vendorSchema = z.object({
+  id: uuidSchema,
+  code: z.string(),
+  name: z.string(),
+  trn: z.string().nullable(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  address: z.string().nullable(),
+  defaultCurrency: currencySchema,
+  paymentTermsDays: z.number().int().nonnegative(),
+  active: z.boolean(),
+});
+
+export const saveVendorSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  trn: z.string().trim().max(32).nullable().default(null),
+  email: z
+    .union([z.string().trim().email(), z.literal(""), z.null()])
+    .transform((value) => value || null),
+  phone: z.string().trim().max(32).nullable().default(null),
+  address: z.string().trim().max(500).nullable().default(null),
+  defaultCurrency: z.enum(["AED", "USD"]).default("AED"),
+  paymentTermsDays: z.number().int().min(0).max(365).default(30),
+  active: z.boolean().default(true),
+});
+
 export const portSchema = z.object({
   id: uuidSchema,
   unLocode: z.string().nullable(),
@@ -147,6 +173,7 @@ export const serviceSchema = z.object({
 
 export const masterDataSchema = z.object({
   customers: z.array(customerSchema),
+  vendors: z.array(vendorSchema),
   ports: z.array(portSchema),
   services: z.array(
     serviceSchema.extend({
@@ -429,6 +456,7 @@ export const invoiceSchema = z.object({
   customerTrn: z.string().nullable(),
   customerAddress: z.string().nullable(),
   paymentTermsDays: z.number().int().nonnegative(),
+  jobId: uuidSchema,
   jobNumber: z.string(),
   polName: z.string(),
   podName: z.string(),
@@ -462,6 +490,83 @@ export const invoiceSchema = z.object({
   total: moneySchema,
 });
 
+export const vendorBillStatusSchema = z.enum(["DRAFT", "APPROVED", "PAID"]);
+
+export const vendorBillLineInputSchema = z
+  .object({
+    serviceId: uuidSchema.nullable().default(null),
+    description: z.string().trim().min(1).max(500),
+    quantity: decimalSchema,
+    uom: z.string().trim().min(1).max(16),
+    currency: z.enum(["AED", "USD"]),
+    exchangeRate: decimalSchema,
+    unitRate: moneySchema,
+    taxRate: decimalSchema,
+  })
+  .superRefine((value, context) => {
+    const rate = Number(value.exchangeRate);
+    if (rate <= 0 || (value.currency === "AED" && rate !== 1)) {
+      context.addIssue({
+        code: "custom",
+        path: ["exchangeRate"],
+        message: "AED exchange rate must be 1 and USD exchange rate must be positive",
+      });
+    }
+  });
+
+export const saveVendorBillSchema = z.object({
+  vendorId: uuidSchema,
+  jobId: uuidSchema,
+  customerInvoiceId: uuidSchema.nullable().default(null),
+  vendorInvoiceNumber: z.string().trim().min(1).max(120),
+  billDate: z.iso.date(),
+  dueDate: z.union([z.iso.date(), z.literal(""), z.null()]).transform((value) => value || null),
+  dateOfSupply: z.union([z.iso.date(), z.literal(""), z.null()]).transform((value) => value || null),
+  blNumber: z.string().trim().max(120).nullable().default(null),
+  department: z.string().trim().max(80).nullable().default(null),
+  remarks: z.string().trim().max(1000).nullable().default(null),
+  sourceFileName: z.string().trim().max(255).nullable().default(null),
+  status: vendorBillStatusSchema.default("DRAFT"),
+  revenueAllocatedAed: moneySchema.default("0.00"),
+  lines: z.array(vendorBillLineInputSchema).min(1).max(100),
+});
+
+export const vendorBillLineSchema = vendorBillLineInputSchema.extend({
+  id: uuidSchema,
+  lineNumber: z.number().int().positive(),
+  serviceName: z.string().nullable(),
+  netAmountAed: moneySchema,
+  vatAmountAed: moneySchema,
+  totalAmountAed: moneySchema,
+});
+
+export const vendorBillSchema = z.object({
+  id: uuidSchema,
+  vendorId: uuidSchema,
+  vendorCode: z.string(),
+  vendorName: z.string(),
+  vendorTrn: z.string().nullable(),
+  jobId: uuidSchema,
+  jobNumber: z.string(),
+  customerInvoiceId: uuidSchema.nullable(),
+  customerInvoiceNumber: z.string().nullable(),
+  vendorInvoiceNumber: z.string(),
+  billDate: z.string(),
+  dueDate: z.string().nullable(),
+  dateOfSupply: z.string().nullable(),
+  blNumber: z.string().nullable(),
+  department: z.string().nullable(),
+  remarks: z.string().nullable(),
+  sourceFileName: z.string().nullable(),
+  status: vendorBillStatusSchema,
+  revenueAllocatedAed: moneySchema,
+  subtotalAed: moneySchema,
+  vatAmountAed: moneySchema,
+  totalAmountAed: moneySchema,
+  profitAed: z.string().regex(/^-?\d+(?:\.\d{1,2})?$/),
+  lines: z.array(vendorBillLineSchema),
+});
+
 export const apiErrorSchema = z.object({
   statusCode: z.number().int(),
   code: z.string(),
@@ -475,9 +580,11 @@ export type ManagedUser = z.infer<typeof managedUserSchema>;
 export type CreateManagedUser = z.infer<typeof createManagedUserSchema>;
 export type UpdateManagedUser = z.infer<typeof updateManagedUserSchema>;
 export type Customer = z.infer<typeof customerSchema>;
+export type Vendor = z.infer<typeof vendorSchema>;
 export type Port = z.infer<typeof portSchema>;
 export type MasterData = z.infer<typeof masterDataSchema>;
 export type SaveCustomer = z.infer<typeof saveCustomerSchema>;
+export type SaveVendor = z.infer<typeof saveVendorSchema>;
 export type SavePort = z.infer<typeof savePortSchema>;
 export type SaveService = z.infer<typeof saveServiceSchema>;
 export type Container = z.infer<typeof containerSchema>;
@@ -489,6 +596,8 @@ export type SaveJob = z.infer<typeof saveJobSchema>;
 export type SaveContainer = z.infer<typeof saveContainerSchema>;
 export type CreateDraft = z.infer<typeof createDraftSchema>;
 export type Invoice = z.infer<typeof invoiceSchema>;
+export type VendorBill = z.infer<typeof vendorBillSchema>;
+export type SaveVendorBill = z.infer<typeof saveVendorBillSchema>;
 
 function decimalToScaled(value: string, scale: number): bigint {
   const [whole, fraction = ""] = value.split(".");
