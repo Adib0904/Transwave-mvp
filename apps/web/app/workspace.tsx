@@ -29,6 +29,11 @@ import {
 } from "./job-form-draft";
 import { parseContainerManifest } from "./container-manifest";
 import {
+  clearVendorInvoiceDraft,
+  readVendorInvoiceDraft,
+  saveVendorInvoiceDraft,
+} from "./vendor-invoice-draft";
+import {
   chargeAmounts,
   formatChargeRate,
   type ChargeCurrency,
@@ -44,7 +49,7 @@ type NavigationPage =
   | "Costs"
   | "Masters"
   | "Users";
-type Page = NavigationPage | "New Job";
+type Page = NavigationPage | "New Job" | "New Vendor Invoice";
 type Dialog =
   | "customer"
   | "job"
@@ -98,7 +103,11 @@ export function Workspace() {
   const pathname = usePathname();
   const { session, user, signOut } = useAuth();
   const [page, setPage] = useState<Page>(
-    pathname === "/jobs/new" ? "New Job" : "Dashboard",
+    pathname === "/jobs/new"
+      ? "New Job"
+      : pathname === "/costs/new"
+        ? "New Vendor Invoice"
+        : "Dashboard",
   );
   const [masters, setMasters] = useState<MasterData | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
@@ -166,8 +175,25 @@ export function Workspace() {
   }, [load]);
   useEffect(() => {
     if (pathname === "/jobs/new") setPage("New Job");
-    else setPage((current) => (current === "New Job" ? "Jobs" : current));
+    else if (pathname === "/costs/new") setPage("New Vendor Invoice");
+    else {
+      const remembered = window.localStorage.getItem("transwave:last-page");
+      setPage((current) =>
+        current === "New Job"
+          ? "Jobs"
+          : current === "New Vendor Invoice"
+            ? "Costs"
+            : (Object.keys(icons) as string[]).includes(remembered || "")
+              ? (remembered as NavigationPage)
+              : current,
+      );
+    }
   }, [pathname]);
+  useEffect(() => {
+    if ((Object.keys(icons) as string[]).includes(page)) {
+      window.localStorage.setItem("transwave:last-page", page);
+    }
+  }, [page]);
 
   async function openJob(id: string) {
     if (!session) return;
@@ -236,7 +262,7 @@ export function Workspace() {
     }
   }
   const nav = (next: Page) => {
-    router.push(next === "New Job" ? "/jobs/new" : "/");
+    router.push(next === "New Job" ? "/jobs/new" : next === "New Vendor Invoice" ? "/costs/new" : "/");
     setPage(next);
     setDialog(null);
     setError("");
@@ -250,6 +276,17 @@ export function Workspace() {
   };
   const closeJobPage = () => {
     setPage("Jobs");
+    router.push("/");
+  };
+  const openNewVendorInvoice = () => {
+    setSelectedVendorBill(null);
+    setDialog(null);
+    setError("");
+    setPage("New Vendor Invoice");
+    router.push("/costs/new");
+  };
+  const closeVendorInvoicePage = () => {
+    setPage("Costs");
     router.push("/");
   };
   if (!session || !user || !masters)
@@ -277,7 +314,9 @@ export function Workspace() {
           <button
             key={item}
             className={
-              page === item || (page === "New Job" && item === "Jobs")
+              page === item ||
+              (page === "New Job" && item === "Jobs") ||
+              (page === "New Vendor Invoice" && item === "Costs")
                 ? "menu active"
                 : "menu"
             }
@@ -306,12 +345,16 @@ export function Workspace() {
         <header>
           <div>
             <p className="kicker">{user.companyName}</p>
-            <h1>{page === "New Job" ? "Create job" : page}</h1>
+            <h1>{page === "New Job" ? "Create job" : page === "New Vendor Invoice" ? "Record vendor invoice" : page}</h1>
           </div>
           <div className="header-actions">
             {page === "New Job" ? (
               <button className="soft" onClick={closeJobPage}>
                 ← Back to jobs
+              </button>
+            ) : page === "New Vendor Invoice" ? (
+              <button className="soft" onClick={closeVendorInvoicePage}>
+                ← Back to costs
               </button>
             ) : (
               <button className="soft" onClick={() => void load()}>
@@ -339,7 +382,7 @@ export function Workspace() {
                 <button className="soft" onClick={() => { setEditingVendor(null); setDialog("vendor"); }}>
                   + Vendor
                 </button>
-                <button className="button" onClick={() => { setSelectedVendorBill(null); setDialog("vendorBill"); }}>
+                <button className="button" onClick={openNewVendorInvoice}>
                   + Vendor invoice
                 </button>
               </>
@@ -416,6 +459,28 @@ export function Workspace() {
                 },
               )
             }
+          />
+        )}
+        {page === "New Vendor Invoice" && canManageBilling && (
+          <NewVendorInvoiceEditor
+            data={masters}
+            jobs={jobs}
+            invoices={invoices}
+            draftOwner={user.userId}
+            close={closeVendorInvoicePage}
+            save={(input, file) => act(async () => {
+              const saved = await api.createVendorBill(session, input);
+              try {
+                return await api.uploadVendorDocument(session, user.companyId, saved.id, file);
+              } catch (reason) {
+                await api.removeVendorBill(session, saved);
+                throw reason;
+              }
+            }, (value) => {
+              setSelectedVendorBill(value);
+              setPage("Costs");
+              router.push("/");
+            })}
           />
         )}
         {page === "Invoices" && (
@@ -1169,7 +1234,11 @@ function Invoices({
 }
 
 function Costs({ bills, vendors, selected, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument }: { bills: VendorBill[]; vendors: Vendor[]; selected: VendorBill | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void }) {
-  const revenue = bills.reduce((sum, bill) => sum + Number(bill.revenueAllocatedAed), 0);
+  const linkedIncome = new Map<string, number>();
+  bills.forEach((bill) => {
+    if (bill.customerInvoiceId) linkedIncome.set(bill.customerInvoiceId, Number(bill.revenueAllocatedAed));
+  });
+  const revenue = [...linkedIncome.values()].reduce((sum, value) => sum + value, 0);
   const expense = bills.reduce((sum, bill) => sum + Number(bill.subtotalAed), 0);
   const profit = revenue - expense;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
@@ -1186,10 +1255,48 @@ const newVendorBillLine = (): VendorBillLineDraft => ({ key: crypto.randomUUID()
 
 function VendorDialog({initial,close,save}:{initial:Vendor|null;close():void;save(value:SaveVendor):void}) { return <Modal title={initial?"Edit vendor":"Add vendor"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),address:nullable(d,"address"),defaultCurrency:String(d.get("currency")) as "AED"|"USD",paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Vendor ID</span><b>{initial?.code||"Created automatically"}</b><small>Vendor invoices and costs remain linked to this record.</small></div><Field label="Legal name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="TRN / VAT number"><input name="trn" defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Address"><textarea name="address" rows={3} defaultValue={initial?.address||""}/></Field><div className="three"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Default currency"><select name="currency" defaultValue={initial?.defaultCurrency||"AED"}><option>AED</option><option>USD</option></select></Field><Field label="Payment terms"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field></div><FormButtons label="Save vendor" close={close}/></form></Modal>; }
 
+function NewVendorInvoiceEditor({data,jobs,invoices,draftOwner,close,save}:{data:MasterData;jobs:JobSummary[];invoices:Invoice[];draftOwner:string;close():void;save(value:SaveVendorBill,file:File):Promise<boolean>}) {
+  const [vendorId,setVendorId]=useState("");
+  const [jobId,setJobId]=useState("");
+  const [customerInvoiceId,setCustomerInvoiceId]=useState("");
+  const [totalAmount,setTotalAmount]=useState("");
+  const [currency,setCurrency]=useState<"AED"|"USD">("AED");
+  const [exchangeRate,setExchangeRate]=useState("1");
+  const [remarks,setRemarks]=useState("");
+  const [document,setDocument]=useState<File|null>(null);
+  const [restoredAt,setRestoredAt]=useState("");
+  const draftReady=useRef(false);
+  const jobOptions=Array.from(new Map([
+    ...jobs.map(job=>[job.id,{id:job.id,jobNumber:job.jobNumber,customerName:job.customerName}] as const),
+    ...invoices.map(invoice=>[invoice.jobId,{id:invoice.jobId,jobNumber:invoice.jobNumber,customerName:invoice.customerName}] as const),
+  ]).values());
+  const availableInvoices=invoices.filter(invoice=>invoice.jobId===jobId);
+  const linkedInvoice=invoices.find(invoice=>invoice.id===customerInvoiceId);
+  const expenseAed=chargeAmounts(1,Number(totalAmount)||0,currency==="AED"?1:Number(exchangeRate)||0,0).netAed;
+  const incomeAed=Number(linkedInvoice?.subtotal||0);
+
+  useEffect(()=>{
+    let active=true;
+    void readVendorInvoiceDraft(draftOwner).then((draft)=>{
+      if(!active)return;
+      if(draft){setVendorId(draft.vendorId);setJobId(draft.jobId);setCustomerInvoiceId(draft.customerInvoiceId);setTotalAmount(draft.totalAmount);setCurrency(draft.currency);setExchangeRate(draft.exchangeRate);setRemarks(draft.remarks);setDocument(draft.document);setRestoredAt(draft.savedAt)}
+      draftReady.current=true;
+    }).catch(()=>{draftReady.current=true});
+    return()=>{active=false};
+  },[draftOwner]);
+
+  useEffect(()=>{
+    if(!draftReady.current)return;
+    const timer=window.setTimeout(()=>{void saveVendorInvoiceDraft(draftOwner,{vendorId,jobId,customerInvoiceId,totalAmount,currency,exchangeRate,remarks,document}).catch(()=>undefined)},250);
+    return()=>window.clearTimeout(timer);
+  },[customerInvoiceId,currency,document,draftOwner,exchangeRate,jobId,remarks,totalAmount,vendorId]);
+
+  return <section className="panel vendor-invoice-editor"><div className="simple-flow-note"><b>Simple vendor invoice entry</b><span>Upload the PDF as the source of truth. Only the accounting total and the records it belongs to are captured here.</span>{restoredAt&&<small>Draft restored from {new Date(restoredAt).toLocaleString()}.</small>}</div><form onSubmit={event=>{event.preventDefault();if(!document)return;const invoiceNumber=document.name.replace(/\.pdf$/i,"").trim()||`VENDOR-${Date.now()}`;void save({vendorId,jobId,customerInvoiceId:customerInvoiceId||null,vendorInvoiceNumber:invoiceNumber,billDate:new Date().toISOString().slice(0,10),dueDate:null,dateOfSupply:null,blNumber:null,department:null,remarks:remarks||null,sourceFileName:null,status:"DRAFT",revenueAllocatedAed:"0.00",lines:[{serviceId:null,description:"Vendor invoice total",quantity:"1",uom:"INV",currency,exchangeRate:currency==="AED"?"1":exchangeRate,unitRate:totalAmount,taxRate:"0"}]},document).then(success=>{if(success)void clearVendorInvoiceDraft(draftOwner)})}}><FormSection title="Invoice and links" note="The PDF keeps the detailed invoice information"><div className="two"><Field label="Vendor"><select required value={vendorId} onChange={event=>setVendorId(event.target.value)}><option value="">Select vendor</option>{data.vendors.filter(vendor=>vendor.active).map(vendor=><option key={vendor.id} value={vendor.id}>{vendor.name} · {vendor.code}</option>)}</select></Field><Field label="Job"><select required value={jobId} onChange={event=>{setJobId(event.target.value);setCustomerInvoiceId("")}}><option value="">Select job</option>{jobOptions.map(job=><option key={job.id} value={job.id}>{job.jobNumber} · {job.customerName}</option>)}</select></Field></div><Field label="Vendor invoice PDF"><input className="file-input" type="file" accept="application/pdf,.pdf" required={!document} onChange={event=>setDocument(event.target.files?.[0]||null)}/><small className="input-help">{document?`Ready to upload: ${document.name}. This selection is preserved in your draft.`:"PDF only, maximum 25 MB."}</small></Field><Field label="Customer invoice to compare"><select value={customerInvoiceId} onChange={event=>setCustomerInvoiceId(event.target.value)}><option value="">Link later</option>{availableInvoices.map(invoice=><option key={invoice.id} value={invoice.id}>{invoice.invoiceNumber||invoice.draftReference} · {money.format(Number(invoice.subtotal))} before VAT</option>)}</select></Field></FormSection><FormSection title="Expense total" note="One total replaces manual service-line entry"><div className="three"><Field label="Currency"><select value={currency} onChange={event=>{const value=event.target.value as "AED"|"USD";setCurrency(value);setExchangeRate(value==="AED"?"1":"3.685")}}><option>AED</option><option>USD</option></select></Field><Field label={`Total amount (${currency})`}><input required type="number" min="0.01" step="0.01" value={totalAmount} onChange={event=>setTotalAmount(event.target.value)} placeholder="0.00"/></Field><Field label="USD to AED exchange rate"><input required type="number" min="0.00000001" step="0.00000001" disabled={currency==="AED"} value={currency==="AED"?"1":exchangeRate} onChange={event=>setExchangeRate(event.target.value)}/></Field></div><div className="profit-preview"><span>Customer income <b>{customerInvoiceId?money.format(incomeAed):"Link an invoice"}</b></span><span>Vendor expense <b>{money.format(expenseAed)}</b></span><strong className={incomeAed-expenseAed>=0?"positive":"negative"}>Estimated gross profit <b>{customerInvoiceId?money.format(incomeAed-expenseAed):"—"}</b></strong></div><Field label="Internal remarks (optional)"><textarea rows={2} value={remarks} onChange={event=>setRemarks(event.target.value)}/></Field></FormSection><FormButtons label="Save vendor invoice" close={close} disabled={!vendorId||!jobId||!document||Number(totalAmount)<=0}/></form></section>;
+}
+
 function VendorBillDialog({initial,data,jobs,invoices,bills,close,save}:{initial:VendorBill|null;data:MasterData;jobs:JobSummary[];invoices:Invoice[];bills:VendorBill[];close():void;save(value:SaveVendorBill,file:File|null):void}) {
   const [jobId,setJobId]=useState(initial?.jobId||"");
   const [customerInvoiceId,setCustomerInvoiceId]=useState(initial?.customerInvoiceId||"");
-  const [revenue,setRevenue]=useState(initial?.revenueAllocatedAed||"0.00");
   const [document,setDocument]=useState<File|null>(null);
   const [lines,setLines]=useState<VendorBillLineDraft[]>(initial?.lines.map(line=>({key:line.id,serviceId:line.serviceId,description:line.description,quantity:line.quantity,uom:line.uom,currency:line.currency as "AED"|"USD",exchangeRate:line.exchangeRate,unitRate:line.unitRate,taxRate:line.taxRate}))||[newVendorBillLine()]);
   const jobOptions = Array.from(new Map([
@@ -1197,18 +1304,12 @@ function VendorBillDialog({initial,data,jobs,invoices,bills,close,save}:{initial
     ...invoices.map(invoice => [invoice.jobId, { id: invoice.jobId, jobNumber: invoice.jobNumber, customerName: invoice.customerName }] as const),
   ]).values());
   const availableInvoices=invoices.filter(invoice=>invoice.jobId===jobId);
-  const remainingRevenue = (invoiceId: string) => {
-    const invoice = invoices.find(item => item.id === invoiceId);
-    const used = bills
-      .filter(bill => bill.customerInvoiceId === invoiceId && bill.id !== initial?.id)
-      .reduce((sum, bill) => sum + Number(bill.revenueAllocatedAed), 0);
-    return Math.max(0, Number(invoice?.subtotal ?? 0) - used);
-  };
+  const linkedIncome = Number(invoices.find(invoice => invoice.id === customerInvoiceId)?.subtotal ?? 0);
   const expense=lines.reduce((sum,line)=>sum+chargeAmounts(Number(line.quantity)||0,Number(line.unitRate)||0,line.currency==="AED"?1:Number(line.exchangeRate)||0,Number(line.taxRate)||0).netAed,0);
   const updateLine=(key:string,values:Partial<VendorBillLineDraft>)=>setLines(current=>current.map(line=>line.key===key?{...line,...values}:line));
-  return <Modal title={initial?"Edit vendor invoice":"Record vendor invoice"} wide close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({vendorId:String(d.get("vendor")),jobId,customerInvoiceId:customerInvoiceId||null,vendorInvoiceNumber:String(d.get("number")),billDate:String(d.get("billDate")),dueDate:String(d.get("dueDate"))||null,dateOfSupply:String(d.get("supplyDate"))||null,blNumber:nullable(d,"bl"),department:nullable(d,"department"),remarks:nullable(d,"remarks"),sourceFileName:initial?.sourceFileName||null,status:String(d.get("status")) as SaveVendorBill["status"],revenueAllocatedAed:revenue,lines:lines.map(({key,...line})=>line)},document)}}><FormSection title="Vendor invoice" note="Supplier, job and source document"><div className="three"><Field label="Vendor"><select name="vendor" required defaultValue={initial?.vendorId||""}><option value="">Select vendor</option>{data.vendors.filter(v=>v.active||v.id===initial?.vendorId).map(v=><option value={v.id} key={v.id}>{v.name} · {v.code}</option>)}</select></Field><Field label="Job"><select name="job" required value={jobId} onChange={event=>{setJobId(event.target.value);setCustomerInvoiceId("");setRevenue("0.00")}}><option value="">Select job</option>{jobOptions.map(job=><option value={job.id} key={job.id}>{job.jobNumber} · {job.customerName}</option>)}</select></Field><Field label="Vendor invoice no."><input name="number" required defaultValue={initial?.vendorInvoiceNumber}/></Field></div><div className="three"><Field label="Invoice date"><input name="billDate" type="date" required defaultValue={initial?.billDate||new Date().toISOString().slice(0,10)}/></Field><Field label="Date of supply"><input name="supplyDate" type="date" defaultValue={initial?.dateOfSupply||""}/></Field><Field label="Due date"><input name="dueDate" type="date" defaultValue={initial?.dueDate||""}/></Field></div><div className="three"><Field label="B/L number"><input name="bl" defaultValue={initial?.blNumber||""}/></Field><Field label="Department"><input name="department" defaultValue={initial?.department||""}/></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"DRAFT"}><option>DRAFT</option><option>APPROVED</option><option>PAID</option></select></Field></div><Field label={initial?.sourceFilePath?"Replace vendor invoice PDF":"Upload vendor invoice PDF"}><input className="file-input" type="file" accept="application/pdf,.pdf" required={!initial?.sourceFilePath} onChange={event=>setDocument(event.target.files?.[0]||null)}/><small className="input-help">{initial?.sourceFileName?`Currently uploaded: ${initial.sourceFileName}. Select a new PDF only to replace it.`:"PDF only, maximum 25 MB. The document is stored privately for your company."}</small></Field></FormSection>
+  return <Modal title={initial?"Edit vendor invoice":"Record vendor invoice"} wide close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({vendorId:String(d.get("vendor")),jobId,customerInvoiceId:customerInvoiceId||null,vendorInvoiceNumber:String(d.get("number")),billDate:String(d.get("billDate")),dueDate:String(d.get("dueDate"))||null,dateOfSupply:String(d.get("supplyDate"))||null,blNumber:nullable(d,"bl"),department:nullable(d,"department"),remarks:nullable(d,"remarks"),sourceFileName:initial?.sourceFileName||null,status:String(d.get("status")) as SaveVendorBill["status"],revenueAllocatedAed:"0.00",lines:lines.map(({key,...line})=>line)},document)}}><FormSection title="Vendor invoice" note="Supplier, job and source document"><div className="three"><Field label="Vendor"><select name="vendor" required defaultValue={initial?.vendorId||""}><option value="">Select vendor</option>{data.vendors.filter(v=>v.active||v.id===initial?.vendorId).map(v=><option value={v.id} key={v.id}>{v.name} · {v.code}</option>)}</select></Field><Field label="Job"><select name="job" required value={jobId} onChange={event=>{setJobId(event.target.value);setCustomerInvoiceId("")}}><option value="">Select job</option>{jobOptions.map(job=><option value={job.id} key={job.id}>{job.jobNumber} · {job.customerName}</option>)}</select></Field><Field label="Vendor invoice no."><input name="number" required defaultValue={initial?.vendorInvoiceNumber}/></Field></div><div className="three"><Field label="Invoice date"><input name="billDate" type="date" required defaultValue={initial?.billDate||new Date().toISOString().slice(0,10)}/></Field><Field label="Date of supply"><input name="supplyDate" type="date" defaultValue={initial?.dateOfSupply||""}/></Field><Field label="Due date"><input name="dueDate" type="date" defaultValue={initial?.dueDate||""}/></Field></div><div className="three"><Field label="B/L number"><input name="bl" defaultValue={initial?.blNumber||""}/></Field><Field label="Department"><input name="department" defaultValue={initial?.department||""}/></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"DRAFT"}><option>DRAFT</option><option>APPROVED</option><option>PAID</option></select></Field></div><Field label={initial?.sourceFilePath?"Replace vendor invoice PDF":"Upload vendor invoice PDF"}><input className="file-input" type="file" accept="application/pdf,.pdf" required={!initial?.sourceFilePath} onChange={event=>setDocument(event.target.files?.[0]||null)}/><small className="input-help">{initial?.sourceFileName?`Currently uploaded: ${initial.sourceFileName}. Select a new PDF only to replace it.`:"PDF only, maximum 25 MB. The document is stored privately for your company."}</small></Field></FormSection>
   <FormSection title="Expense lines" note="Amounts are converted and reported in AED"><div className="vendor-line-head"><span>Description / service</span><span>Qty / unit</span><span>Currency / FX</span><span>Rate</span><span>VAT %</span></div>{lines.map((line,index)=><div className="vendor-line" key={line.key}><div><select aria-label={`Line ${index+1} service`} value={line.serviceId||""} onChange={event=>{const service=data.services.find(item=>item.id===event.target.value);updateLine(line.key,{serviceId:event.target.value||null,description:line.description||service?.name||"",uom:line.uom||service?.defaultUom||"JOB"})}}><option value="">Other expense</option>{data.services.map(service=><option value={service.id} key={service.id}>{service.name}</option>)}</select><input aria-label={`Line ${index+1} description`} required value={line.description} onChange={event=>updateLine(line.key,{description:event.target.value})} placeholder="Ocean freight"/></div><div><input aria-label={`Line ${index+1} quantity`} required type="number" min="0.001" step="0.001" value={line.quantity} onChange={event=>updateLine(line.key,{quantity:event.target.value})}/><input aria-label={`Line ${index+1} unit`} required value={line.uom} onChange={event=>updateLine(line.key,{uom:event.target.value})}/></div><div><select aria-label={`Line ${index+1} currency`} value={line.currency} onChange={event=>updateLine(line.key,{currency:event.target.value as "AED"|"USD",exchangeRate:event.target.value==="AED"?"1":"3.685"})}><option>AED</option><option>USD</option></select><input aria-label={`Line ${index+1} exchange rate`} required type="number" min="0.00000001" step="0.00000001" disabled={line.currency==="AED"} value={line.currency==="AED"?"1":line.exchangeRate} onChange={event=>updateLine(line.key,{exchangeRate:event.target.value})}/></div><input aria-label={`Line ${index+1} rate`} required type="number" min="0" step="0.01" value={line.unitRate} onChange={event=>updateLine(line.key,{unitRate:event.target.value})}/><div><input aria-label={`Line ${index+1} VAT`} required type="number" min="0" step="0.01" value={line.taxRate} onChange={event=>updateLine(line.key,{taxRate:event.target.value})}/><button className="danger-link" type="button" disabled={lines.length===1} onClick={()=>setLines(current=>current.filter(item=>item.key!==line.key))}>Remove</button></div></div>)}<button className="link-button" type="button" onClick={()=>setLines(current=>[...current,newVendorBillLine()])}>+ Add expense line</button><div className="dialog-total"><span>Vendor expense before VAT</span><b>{money.format(expense)}</b></div></FormSection>
-  <FormSection title="Income link and profit" note="Allocate customer revenue once across vendor invoices"><div className="two"><Field label="Customer invoice"><select name="customerInvoice" value={customerInvoiceId} onChange={event=>{const id=event.target.value;setCustomerInvoiceId(id);setRevenue(id?remainingRevenue(id).toFixed(2):"0.00")}}><option value="">Not linked yet</option>{availableInvoices.map(invoice=><option value={invoice.id} key={invoice.id}>{invoice.invoiceNumber||invoice.draftReference} · {money.format(remainingRevenue(invoice.id))} available</option>)}</select></Field><Field label="Revenue allocated (AED, before VAT)"><input name="revenue" required type="number" min="0" max={customerInvoiceId?remainingRevenue(customerInvoiceId):0} step="0.01" value={revenue} onChange={event=>setRevenue(event.target.value)}/></Field></div><div className="profit-preview"><span>Allocated income <b>{money.format(Number(revenue)||0)}</b></span><span>Vendor expense <b>{money.format(expense)}</b></span><strong className={(Number(revenue)||0)-expense>=0?"positive":"negative"}>Gross profit <b>{money.format((Number(revenue)||0)-expense)}</b></strong></div><Field label="Remarks"><textarea name="remarks" rows={2} defaultValue={initial?.remarks||""}/></Field></FormSection><FormButtons label={initial?"Update vendor invoice":"Save vendor invoice"} close={close} disabled={!data.vendors.length||!jobId||!lines.every(line=>line.description)||(!initial?.sourceFilePath&&!document)}/></form></Modal>;
+  <FormSection title="Customer invoice and profit" note="Customer income is taken automatically from the linked invoice"><Field label="Customer invoice"><select name="customerInvoice" value={customerInvoiceId} onChange={event=>setCustomerInvoiceId(event.target.value)}><option value="">Not linked yet</option>{availableInvoices.map(invoice=><option value={invoice.id} key={invoice.id}>{invoice.invoiceNumber||invoice.draftReference} · {money.format(Number(invoice.subtotal))} before VAT</option>)}</select></Field><div className="profit-preview"><span>Customer income <b>{customerInvoiceId?money.format(linkedIncome):"Link an invoice"}</b></span><span>Vendor expense <b>{money.format(expense)}</b></span><strong className={linkedIncome-expense>=0?"positive":"negative"}>Gross profit <b>{customerInvoiceId?money.format(linkedIncome-expense):"—"}</b></strong></div><Field label="Remarks"><textarea name="remarks" rows={2} defaultValue={initial?.remarks||""}/></Field></FormSection><FormButtons label={initial?"Update vendor invoice":"Save vendor invoice"} close={close} disabled={!data.vendors.length||!jobId||!lines.every(line=>line.description)||(!initial?.sourceFilePath&&!document)}/></form></Modal>;
 }
 
 function Masters({

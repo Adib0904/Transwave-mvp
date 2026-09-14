@@ -24,7 +24,7 @@ export class VendorBillsService {
       database.from("vendors").select("id, vendor_code, legal_name, trn").eq("id", bill.vendor_id).single(),
       database.from("jobs").select("id, job_number").eq("id", bill.job_id).single(),
       bill.customer_invoice_id
-        ? database.from("invoices").select("id, invoice_number, draft_reference").eq("id", bill.customer_invoice_id).single()
+        ? database.from("invoices").select("id, invoice_number, draft_reference, subtotal_aed").eq("id", bill.customer_invoice_id).single()
         : Promise.resolve({ data: null, error: null }),
     ]);
     for (const result of [linesResult, vendorResult, jobResult, invoiceResult]) if (result.error) throwDatabaseError(result.error);
@@ -94,13 +94,13 @@ export class VendorBillsService {
     lines: LineRow[],
     vendor: { id: string; vendor_code: string; legal_name: string; trn: string | null },
     job: { id: string; job_number: string },
-    invoice: { id: string; invoice_number: string | null; draft_reference: string } | null,
+    invoice: { id: string; invoice_number: string | null; draft_reference: string; subtotal_aed: number } | null,
     services: Map<string, string>,
   ): VendorBill {
     const subtotal = lines.reduce((sum, line) => sum + Number(line.net_amount_aed), 0);
     const vat = lines.reduce((sum, line) => sum + Number(line.vat_amount_aed), 0);
     const total = lines.reduce((sum, line) => sum + Number(line.total_amount_aed), 0);
-    const revenue = Number(bill.revenue_allocated_aed);
+    const revenue = Number(invoice?.subtotal_aed ?? 0);
     return {
       id: bill.id,
       vendorId: vendor.id,
