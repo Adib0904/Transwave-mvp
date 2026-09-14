@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./brand.css";
 import { AuthProvider } from "./auth";
+import { PortalRoot } from "./portal-root";
 
 export const metadata: Metadata = {
   title: "TransWave Operations",
@@ -9,5 +10,14 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body><AuthProvider>{children}</AuthProvider></body></html>;
+  return (
+    <html lang="en">
+      <body>
+        <AuthProvider>
+          <PortalRoot />
+          {children}
+        </AuthProvider>
+      </body>
+    </html>
+  );
 }

@@ -99,7 +99,7 @@ export function Workspace() {
   const router = useRouter();
   const pathname = usePathname();
   const { session, user, signOut } = useAuth();
-  const [page, setPage] = useState<Page>(() => pageFromPathname(pathname));
+  const page = pageFromPathname(pathname);
   const [masters, setMasters] = useState<MasterData | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -122,6 +122,7 @@ export function Workspace() {
   } | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const loadInFlight = useRef<Promise<void> | null>(null);
   const canManageOperations = ["OWNER", "ADMIN", "OPERATIONS"].includes(
     user?.role ?? "VIEWER",
   );
@@ -130,51 +131,57 @@ export function Workspace() {
   );
   const canManageSetup = ["OWNER", "ADMIN"].includes(user?.role ?? "VIEWER");
 
-  const load = useCallback(async () => {
-    if (!session) return;
+  const load = useCallback((): Promise<void> => {
+    if (!session || !user) return Promise.resolve();
+    if (loadInFlight.current) return loadInFlight.current;
     setBusy(true);
     setError("");
-    try {
-      const [nextMasters, nextJobs, nextInvoices, nextVendorBills, nextUsers] =
-        await Promise.all([
-          api.masters(session),
-          api.jobs(session),
-          api.invoices(session),
-          api.vendorBills(session),
-          user && ["OWNER", "ADMIN"].includes(user.role)
-            ? api.users(session)
-            : Promise.resolve([]),
-        ]);
-      setMasters(nextMasters);
-      setJobs(nextJobs);
-      setInvoices(nextInvoices);
-      setVendorBills(nextVendorBills);
-      setSelectedJob((current) =>
-        current && nextJobs.some((job) => job.id === current.id)
-          ? current
-          : null,
-      );
-      setUsers(nextUsers);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setBusy(false);
-    }
+    const request = Promise.all([
+      api.masters(session),
+      api.jobs(session),
+      api.invoices(session),
+      api.vendorBills(session),
+      ["OWNER", "ADMIN"].includes(user.role)
+        ? api.users(session)
+        : Promise.resolve([]),
+    ])
+      .then(
+        ([nextMasters, nextJobs, nextInvoices, nextVendorBills, nextUsers]) => {
+          setMasters(nextMasters);
+          setJobs(nextJobs);
+          setInvoices(nextInvoices);
+          setVendorBills(nextVendorBills);
+          setSelectedJob((current) =>
+            current && nextJobs.some((job) => job.id === current.id)
+              ? current
+              : null,
+          );
+          setUsers(nextUsers);
+        },
+      )
+      .catch((reason: unknown) => setError(message(reason)))
+      .finally(() => {
+        setBusy(false);
+        loadInFlight.current = null;
+      });
+    loadInFlight.current = request;
+    return request;
   }, [session, user]);
   useEffect(() => {
     void load();
   }, [load]);
-  useEffect(() => {
-    setPage(pageFromPathname(pathname));
-  }, [pathname]);
+
+  const goTo = (next: Page) => {
+    const destination = navigationPaths[next];
+    if (pathname !== destination) router.push(destination);
+  };
 
   async function openJob(id: string) {
     if (!session) return;
     setBusy(true);
     try {
       setSelectedJob(await api.job(session, id));
-      setPage("Jobs");
-      router.push(navigationPaths.Jobs);
+      goTo("Jobs");
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -186,8 +193,7 @@ export function Workspace() {
     setBusy(true);
     try {
       setSelectedInvoice(await api.invoice(session, id));
-      setPage("Invoices");
-      router.push(navigationPaths.Invoices);
+      goTo("Invoices");
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -199,8 +205,7 @@ export function Workspace() {
     setBusy(true);
     try {
       setSelectedVendorBill(await api.vendorBill(session, id));
-      setPage("Costs");
-      router.push(navigationPaths.Costs);
+      goTo("Costs");
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -238,8 +243,7 @@ export function Workspace() {
     }
   }
   const nav = (next: Page) => {
-    router.push(navigationPaths[next]);
-    setPage(next);
+    goTo(next);
     setDialog(null);
     setError("");
   };
@@ -247,23 +251,19 @@ export function Workspace() {
     setSelectedJob(null);
     setDialog(null);
     setError("");
-    setPage("New Job");
-    router.push(navigationPaths["New Job"]);
+    goTo("New Job");
   };
   const closeJobPage = () => {
-    setPage("Jobs");
-    router.push(navigationPaths.Jobs);
+    goTo("Jobs");
   };
   const openNewVendorInvoice = () => {
     setSelectedVendorBill(null);
     setDialog(null);
     setError("");
-    setPage("New Vendor Invoice");
-    router.push(navigationPaths["New Vendor Invoice"]);
+    goTo("New Vendor Invoice");
   };
   const closeVendorInvoicePage = () => {
-    setPage("Costs");
-    router.push(navigationPaths.Costs);
+    goTo("Costs");
   };
   if (!session || !user || !masters)
     return (
@@ -430,8 +430,7 @@ export function Workspace() {
                 () => api.createJob(session, input),
                 (value) => {
                   setSelectedJob(value);
-                  setPage("Jobs");
-                  router.push(navigationPaths.Jobs);
+                  goTo("Jobs");
                 },
               )
             }
@@ -454,8 +453,7 @@ export function Workspace() {
               }
             }, (value) => {
               setSelectedVendorBill(value);
-              setPage("Costs");
-              router.push(navigationPaths.Costs);
+              goTo("Costs");
             })}
           />
         )}
@@ -566,7 +564,7 @@ export function Workspace() {
               () => api.updateJob(session, selectedJob.id, input),
               (value) => {
                 setSelectedJob(value);
-                setPage("Jobs");
+                goTo("Jobs");
               },
             )
           }
@@ -606,8 +604,7 @@ export function Workspace() {
               () => api.createDraft(session, selectedJob.id, ids),
               (value) => {
                 setSelectedInvoice(value);
-                setPage("Invoices");
-                router.push(navigationPaths.Invoices);
+                goTo("Invoices");
               },
             )
           }
