@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
-import { containerSchema, type Invoice } from "@transwave/contracts";
-import type { Database, TransWaveDatabaseClient } from "@transwave/database";
+import { containerSchema, type Invoice, type UpdateInvoice } from "@transwave/contracts";
+import type { Database, Json, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
 import { requireTenantRole } from "../common/tenant.js";
@@ -51,6 +51,23 @@ export class InvoicesService {
     return this.findOne(database, id);
   }
 
+  async update(database: TransWaveDatabaseClient, userId: string, id: string, input: UpdateInvoice): Promise<Invoice> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    const { error } = await database.rpc("update_invoice", {
+      p_invoice_id: id,
+      p_invoice_date: input.invoiceDate,
+      p_due_date: input.dueDate,
+      p_customer_name: input.customerName,
+      p_customer_trn: input.customerTrn,
+      p_customer_vat_number: input.customerVatNumber,
+      p_customer_address: input.customerAddress,
+      p_remarks: input.remarks,
+      p_lines: input.lines as unknown as Json,
+    });
+    if (error) throwDatabaseError(error);
+    return this.findOne(database, id);
+  }
+
   private toInvoice(invoice: InvoiceRow, lines: InvoiceLineRow[]): Invoice {
     const containers = containerSchema.array().safeParse(invoice.containers_snapshot);
     return {
@@ -69,7 +86,9 @@ export class InvoicesService {
       branchAddress: invoice.branch_address_snapshot,
       customerName: invoice.customer_name_snapshot,
       customerTrn: invoice.customer_trn_snapshot,
+      customerVatNumber: invoice.customer_vat_number_snapshot,
       customerAddress: invoice.customer_address_snapshot,
+      remarks: invoice.remarks,
       paymentTermsDays: invoice.payment_terms_days_snapshot,
       jobId: invoice.job_id,
       jobNumber: invoice.job_number_snapshot,

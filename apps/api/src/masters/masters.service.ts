@@ -9,7 +9,7 @@ type CustomerRow = Database["public"]["Tables"]["customers"]["Row"];
 type PortRow = Database["public"]["Tables"]["ports"]["Row"];
 type ServiceRow = Database["public"]["Tables"]["services"]["Row"];
 type VendorRow = Database["public"]["Tables"]["vendors"]["Row"];
-const mapCustomer = (row: CustomerRow): Customer => ({ id: row.id, code: row.customer_code, name: row.company_name, trn: row.trn, email: row.email, phone: row.phone, billingAddress: row.billing_address, defaultCurrency: row.default_currency, paymentTermsDays: row.payment_terms_days, active: row.active });
+const mapCustomer = (row: CustomerRow): Customer => ({ id: row.id, code: row.customer_code, name: row.company_name, trn: row.trn, vatNumber: row.vat_number, email: row.email, phone: row.phone, billingAddress: row.billing_address, defaultCurrency: row.default_currency, paymentTermsDays: row.payment_terms_days, active: row.active });
 const mapPort = (row: PortRow, companyId: string): Port => ({ id: row.id, unLocode: row.un_locode?.trim() || null, name: row.name, countryCode: row.country_code.trim(), active: row.active, editable: row.company_id === companyId });
 const mapService = (row: ServiceRow) => ({ id: row.id, code: row.code, name: row.name, defaultUom: row.default_uom, defaultCurrency: row.default_currency, defaultTaxRateId: row.default_tax_rate_id, active: row.active });
 const mapVendor = (row: VendorRow): Vendor => ({ id: row.id, code: row.vendor_code, name: row.legal_name, trn: row.trn, email: row.email, phone: row.phone, address: row.address, defaultCurrency: row.default_currency.trim(), paymentTermsDays: row.payment_terms_days, active: row.active });
@@ -62,7 +62,7 @@ export class MastersService {
 
   async createCustomer(database: TransWaveDatabaseClient, userId: string, input: SaveCustomer) {
     const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
-    const result = await database.from("customers").insert({ company_id: tenant.companyId, customer_code: "", company_name: input.name, trn: input.trn, email: input.email, phone: input.phone, billing_address: input.billingAddress, default_currency: input.defaultCurrency, payment_terms_days: input.paymentTermsDays, active: input.active }).select("*").single();
+    const result = await database.from("customers").insert({ company_id: tenant.companyId, customer_code: "", company_name: input.name, trn: input.trn, vat_number: input.vatNumber, email: input.email, phone: input.phone, billing_address: input.billingAddress, default_currency: input.defaultCurrency, payment_terms_days: input.paymentTermsDays, active: input.active }).select("*").single();
     return mapCustomer(requireData(result.data, result.error, "Customer was not created"));
   }
 
@@ -71,6 +71,7 @@ export class MastersService {
     const values: Database["public"]["Tables"]["customers"]["Update"] = {};
     if (input.name !== undefined) values.company_name = input.name;
     if (input.trn !== undefined) values.trn = input.trn;
+    if (input.vatNumber !== undefined) values.vat_number = input.vatNumber;
     if (input.email !== undefined) values.email = input.email;
     if (input.phone !== undefined) values.phone = input.phone;
     if (input.billingAddress !== undefined) values.billing_address = input.billingAddress;

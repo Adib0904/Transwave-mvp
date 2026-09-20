@@ -74,6 +74,7 @@ export const customerSchema = z.object({
   code: z.string(),
   name: z.string(),
   trn: z.string().nullable(),
+  vatNumber: z.string().nullable(),
   email: z.string().nullable(),
   phone: z.string().nullable(),
   billingAddress: z.string().nullable(),
@@ -84,7 +85,8 @@ export const customerSchema = z.object({
 
 export const saveCustomerSchema = z.object({
   name: z.string().trim().min(1).max(200),
-  trn: z.string().trim().max(32).nullable().default(null),
+  trn: z.string().trim().min(1, "TRN number is required").max(32),
+  vatNumber: z.string().trim().min(1, "VAT number is required").max(32),
   email: z
     .union([z.string().trim().email(), z.literal(""), z.null()])
     .transform((value) => value || null),
@@ -457,7 +459,9 @@ export const invoiceSchema = z.object({
   branchAddress: z.string().nullable(),
   customerName: z.string(),
   customerTrn: z.string().nullable(),
+  customerVatNumber: z.string().nullable(),
   customerAddress: z.string().nullable(),
+  remarks: z.string().nullable(),
   paymentTermsDays: z.number().int().nonnegative(),
   jobId: uuidSchema,
   jobNumber: z.string(),
@@ -491,6 +495,39 @@ export const invoiceSchema = z.object({
   subtotal: moneySchema,
   vatAmount: moneySchema,
   total: moneySchema,
+});
+
+export const updateInvoiceLineSchema = z
+  .object({
+    id: uuidSchema,
+    description: z.string().trim().min(1).max(500),
+    quantity: decimalSchema,
+    uom: z.string().trim().min(1).max(16),
+    currency: z.enum(["AED", "USD"]),
+    exchangeRate: decimalSchema,
+    unitRate: moneySchema,
+    taxRateId: uuidSchema,
+  })
+  .superRefine((value, context) => {
+    const rate = Number(value.exchangeRate);
+    if (rate <= 0 || (value.currency === "AED" && rate !== 1)) {
+      context.addIssue({
+        code: "custom",
+        path: ["exchangeRate"],
+        message: "AED exchange rate must be 1 and USD exchange rate must be positive",
+      });
+    }
+  });
+
+export const updateInvoiceSchema = z.object({
+  invoiceDate: z.iso.date(),
+  dueDate: z.union([z.iso.date(), z.literal(""), z.null()]).transform((value) => value || null),
+  customerName: z.string().trim().min(1).max(200),
+  customerTrn: z.string().trim().min(1).max(32),
+  customerVatNumber: z.string().trim().min(1).max(32),
+  customerAddress: z.string().trim().max(500).nullable().default(null),
+  remarks: z.string().trim().max(1500).nullable().default(null),
+  lines: z.array(updateInvoiceLineSchema).min(1).max(100),
 });
 
 export const vendorBillStatusSchema = z.enum(["DRAFT", "APPROVED", "PAID"]);
@@ -605,6 +642,7 @@ export type SaveJob = z.infer<typeof saveJobSchema>;
 export type SaveContainer = z.infer<typeof saveContainerSchema>;
 export type CreateDraft = z.infer<typeof createDraftSchema>;
 export type Invoice = z.infer<typeof invoiceSchema>;
+export type UpdateInvoice = z.infer<typeof updateInvoiceSchema>;
 export type VendorBill = z.infer<typeof vendorBillSchema>;
 export type SaveVendorBill = z.infer<typeof saveVendorBillSchema>;
 export type AttachVendorDocument = z.infer<typeof attachVendorDocumentSchema>;

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -p 3000",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node invoice-model.test.cjs && node print-invoice.test.cjs && node job-form-draft.test.cjs && node container-manifest.test.cjs && node charge-money.test.cjs && node navigation.test.cjs"
+    "test:unit": "node invoice-model.test.cjs && node print-invoice.test.cjs && node job-form-draft.test.cjs && node container-manifest.test.cjs && node charge-money.test.cjs && node navigation.test.cjs && node --import tsx --test app/amount-in-words.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.116.0",

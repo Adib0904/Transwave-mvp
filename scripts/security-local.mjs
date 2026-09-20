@@ -63,12 +63,13 @@ try {
   assert(anonymous.status === 401, "Anonymous API access was not rejected");
 
   const adminJobs = await api("/jobs", adminToken);
-  assert(adminJobs.response.status === 200 && adminJobs.body.length > 0, "Administrator jobs were not returned");
-  const crossTenant = await api(`/jobs/${adminJobs.body[0].id}`, viewerToken);
+  assert(adminJobs.response.status === 200, "Administrator jobs were not returned");
+  const invoices = await api("/invoices", adminToken);
+  assert(invoices.response.status === 200 && invoices.body.length > 0, "Invoices were not returned");
+  const testJobId = adminJobs.body[0]?.id ?? invoices.body[0].jobId;
+  const crossTenant = await api(`/jobs/${testJobId}`, viewerToken);
   assert(crossTenant.response.status === 404, "Cross-tenant object access was not hidden");
 
-  const invoices = await api("/invoices", adminToken);
-  assert(invoices.response.status === 200, "Invoices were not returned");
   const invoiceId = invoices.body[0]?.id ?? "00000000-0000-4000-8000-000000000001";
   const directTamper = await fetch(`${supabaseUrl}/rest/v1/invoices?id=eq.${invoiceId}`, {
     method: "PATCH",
@@ -97,14 +98,14 @@ try {
   await setMembership(companyId, userId, { role: "OPERATIONS" });
   const operationDraft = await api("/invoices/drafts", adminToken, {
     method: "POST",
-    body: JSON.stringify({ jobId: adminJobs.body[0].id, chargeIds: ["00000000-0000-4000-8000-000000000001"] })
+    body: JSON.stringify({ jobId: testJobId, chargeIds: ["00000000-0000-4000-8000-000000000001"] })
   });
   assert(operationDraft.response.status === 403, "Operations role was allowed to create an invoice draft");
   const operationSetup = await api("/masters/services", adminToken, { method: "POST", body: JSON.stringify(serviceInput) });
   assert(operationSetup.response.status === 403, "Operations role was allowed to change protected setup");
 
   await setMembership(companyId, userId, { role: "FINANCE" });
-  const jobDetail = await api(`/jobs/${adminJobs.body[0].id}`, adminToken);
+  const jobDetail = await api(`/jobs/${testJobId}`, adminToken);
   const financeJobUpdate = await api(`/jobs/${jobDetail.body.id}`, adminToken, {
     method: "PATCH",
     body: JSON.stringify({
@@ -127,7 +128,7 @@ try {
   assert(financeJobUpdate.response.status === 403, `Finance operational update returned ${financeJobUpdate.response.status}: ${JSON.stringify(financeJobUpdate.body)}`);
   const financeCustomer = await api("/masters/customers", adminToken, {
     method: "POST",
-    body: JSON.stringify({ code: "SEC", name: "Security Test", trn: null, email: null, phone: null, billingAddress: null, defaultCurrency: "AED", paymentTermsDays: 30, active: true })
+    body: JSON.stringify({ name: "Security Test", trn: "SECURITY-TRN", vatNumber: "SECURITY-VAT", email: null, phone: null, billingAddress: null, defaultCurrency: "AED", paymentTermsDays: 30, active: true })
   });
   assert(financeCustomer.response.status === 403, "Finance role was allowed to create operational customer data");
 

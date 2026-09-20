@@ -266,6 +266,7 @@ export type Database = {
           payment_terms_days: number
           phone: string | null
           trn: string | null
+          vat_number: string | null
           updated_at: string
         }
         Insert: {
@@ -281,6 +282,7 @@ export type Database = {
           payment_terms_days?: number
           phone?: string | null
           trn?: string | null
+          vat_number?: string | null
           updated_at?: string
         }
         Update: {
@@ -296,6 +298,7 @@ export type Database = {
           payment_terms_days?: number
           phone?: string | null
           trn?: string | null
+          vat_number?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -494,6 +497,7 @@ export type Database = {
           customer_name_snapshot: string
           customer_reference_snapshot: string | null
           customer_trn_snapshot: string | null
+          customer_vat_number_snapshot: string | null
           customs_doc_reference_snapshot: string | null
           draft_reference: string
           due_date: string | null
@@ -509,6 +513,7 @@ export type Database = {
           origin_port_snapshot: string | null
           package_count_snapshot: number | null
           payment_terms_days_snapshot: number
+          remarks: string | null
           place_of_delivery_snapshot: string | null
           planned_container_count_snapshot: number
           planned_container_type_snapshot: string
@@ -550,6 +555,7 @@ export type Database = {
           customer_name_snapshot: string
           customer_reference_snapshot?: string | null
           customer_trn_snapshot?: string | null
+          customer_vat_number_snapshot?: string | null
           customs_doc_reference_snapshot?: string | null
           draft_reference?: string
           due_date?: string | null
@@ -565,6 +571,7 @@ export type Database = {
           origin_port_snapshot?: string | null
           package_count_snapshot?: number | null
           payment_terms_days_snapshot: number
+          remarks?: string | null
           place_of_delivery_snapshot?: string | null
           planned_container_count_snapshot: number
           planned_container_type_snapshot: string
@@ -606,6 +613,7 @@ export type Database = {
           customer_name_snapshot?: string
           customer_reference_snapshot?: string | null
           customer_trn_snapshot?: string | null
+          customer_vat_number_snapshot?: string | null
           customs_doc_reference_snapshot?: string | null
           draft_reference?: string
           due_date?: string | null
@@ -621,6 +629,7 @@ export type Database = {
           origin_port_snapshot?: string | null
           package_count_snapshot?: number | null
           payment_terms_days_snapshot?: number
+          remarks?: string | null
           place_of_delivery_snapshot?: string | null
           planned_container_count_snapshot?: number
           planned_container_type_snapshot?: string
@@ -1422,6 +1431,20 @@ export type Database = {
         Returns: boolean
       }
       issue_invoice: { Args: { p_invoice_id: string }; Returns: string }
+      update_invoice: {
+        Args: {
+          p_customer_address: string | null
+          p_customer_name: string
+          p_customer_trn: string
+          p_customer_vat_number: string
+          p_due_date: string | null
+          p_invoice_date: string
+          p_invoice_id: string
+          p_lines: Json
+          p_remarks: string | null
+        }
+        Returns: string
+      }
       save_job_charge: {
         Args: {
           p_currency_code: string

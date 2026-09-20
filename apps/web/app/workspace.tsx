@@ -14,6 +14,7 @@ import type {
   ManagedUser,
   CreateManagedUser,
   UpdateManagedUser,
+  UpdateInvoice,
   SaveVendor,
   SaveVendorBill,
   Vendor,
@@ -22,6 +23,7 @@ import type {
 import { api } from "./api";
 import { useAuth } from "./auth";
 import { invoicePrintTitle, printInvoice } from "./print-invoice";
+import { aedAmountInWords } from "./amount-in-words";
 import {
   clearJobFormDraft,
   readJobFormDraft,
@@ -53,6 +55,7 @@ type Dialog =
   | "container"
   | "charge"
   | "invoice"
+  | "invoiceEdit"
   | "port"
   | "service"
   | "user"
@@ -518,6 +521,7 @@ export function Workspace() {
             invoices={invoices}
             selected={selectedInvoice}
             canIssue={canManageBilling}
+            onEdit={() => setDialog("invoiceEdit")}
             onOpen={openInvoice}
             onIssue={() =>
               selectedInvoice &&
@@ -659,6 +663,24 @@ export function Workspace() {
                 setSelectedInvoice(value);
                 goTo("Invoices");
               },
+            )
+          }
+        />
+      )}
+      {dialog === "invoiceEdit" && selectedInvoice && (
+        <InvoiceEditDialog
+          invoice={selectedInvoice}
+          taxes={masters.taxRates}
+          close={() => setDialog(null)}
+          save={(input) =>
+            void confirmAction(
+              {
+                title: "Save invoice revision?",
+                message: `${selectedInvoice.invoiceNumber || selectedInvoice.draftReference} will keep its number and status. The change will be recorded in the audit log.`,
+                confirmLabel: "Save revision",
+              },
+              () => api.updateInvoice(session, selectedInvoice.id, input),
+              setSelectedInvoice,
             )
           }
         />
@@ -812,7 +834,7 @@ function Customers({
       <div className="table customers">
         <div className="thead">
           <span>Customer / ID</span>
-          <span>TRN number</span>
+          <span>TRN / VAT</span>
           <span>Currency</span>
           <span>Terms</span>
           <span>Status</span>
@@ -827,7 +849,7 @@ function Customers({
               <b>{c.name}</b>
               <small>{c.code}</small>
             </div>
-            <span>{c.trn || "—"}</span>
+            <span>{c.trn && c.vatNumber ? `${c.trn} / ${c.vatNumber}` : "Tax details required"}</span>
             <span>{c.defaultCurrency}</span>
             <span>{c.paymentTermsDays} days</span>
             <Tag text={c.active ? "ACTIVE" : "INACTIVE"} />
@@ -1134,12 +1156,14 @@ function Invoices({
   selected,
   canIssue,
   onOpen,
+  onEdit,
   onIssue,
 }: {
   invoices: Invoice[];
   selected: Invoice | null;
   canIssue: boolean;
   onOpen(id: string): void;
+  onEdit(): void;
   onIssue(): void;
 }) {
   return (
@@ -1172,6 +1196,7 @@ function Invoices({
           <div className="detail-grid">
             <Detail label="Bill to" value={selected.customerName} />
             <Detail label="Customer TRN" value={selected.customerTrn || "—"} />
+            <Detail label="Customer VAT" value={selected.customerVatNumber || "—"} />
             <Detail
               label="Route"
               value={[
@@ -1233,6 +1258,11 @@ function Invoices({
             </strong>
           </div>
           <div className="form-actions">
+            {canIssue && (
+              <button className="soft" onClick={onEdit}>
+                Edit invoice
+              </button>
+            )}
             {canIssue && selected.status === "DRAFT" && (
               <button className="button" onClick={onIssue}>
                 Issue invoice
@@ -1252,7 +1282,7 @@ function Invoices({
       ) : (
         <Panel title="Select an invoice" sub="View a draft or issued invoice">
           <p className="empty-panel">
-            Issued invoice snapshots remain immutable.
+            Draft and issued invoices can be reviewed and revised by Finance.
           </p>
         </Panel>
       )}
@@ -1537,7 +1567,8 @@ function CustomerDialog({
           const d = new FormData(event.currentTarget);
           save({
             name: String(d.get("name")),
-            trn: nullable(d, "trn"),
+            trn: String(d.get("trn")),
+            vatNumber: String(d.get("vatNumber")),
             email: nullable(d, "email"),
             phone: nullable(d, "phone"),
             billingAddress: nullable(d, "address"),
@@ -1563,19 +1594,24 @@ function CustomerDialog({
           <Field label="TRN number">
             <input
               name="trn"
+              required
               maxLength={32}
               defaultValue={initial?.trn || ""}
             />
-            <small className="input-help">Tax Registration Number shown on customer invoices.</small>
+            <small className="input-help">Customer Tax Registration Number.</small>
           </Field>
-          <Field label="Billing email">
+          <Field label="VAT number">
             <input
-              name="email"
-              type="email"
-              defaultValue={initial?.email || ""}
+              name="vatNumber"
+              required
+              maxLength={32}
+              defaultValue={initial?.vatNumber || ""}
             />
           </Field>
         </div>
+        <Field label="Billing email">
+          <input name="email" type="email" defaultValue={initial?.email || ""} />
+        </Field>
         <Field label="Billing address">
           <input name="address" defaultValue={initial?.billingAddress || ""} />
         </Field>
@@ -2449,6 +2485,152 @@ function InvoiceDialog({
   );
 }
 
+function InvoiceEditDialog({
+  invoice,
+  taxes,
+  close,
+  save,
+}: {
+  invoice: Invoice;
+  taxes: MasterData["taxRates"];
+  close(): void;
+  save(value: UpdateInvoice): void;
+}) {
+  const [lines, setLines] = useState(
+    invoice.lines.map((line) => ({
+      id: line.id,
+      description: line.description,
+      quantity: line.quantity,
+      uom: line.uom,
+      currency: line.currency as "AED" | "USD",
+      exchangeRate: line.exchangeRate,
+      unitRate: line.unitRate,
+      taxRateId:
+        taxes.find(
+          (tax) => tax.code === line.taxCode && tax.rate === line.taxRate,
+        )?.id || taxes[0]?.id || "",
+    })),
+  );
+  const updateLine = (
+    index: number,
+    field: keyof (typeof lines)[number],
+    value: string,
+  ) =>
+    setLines((current) =>
+      current.map((line, lineIndex) =>
+        lineIndex === index
+          ? {
+              ...line,
+              [field]: value,
+              ...(field === "currency" && value === "AED"
+                ? { exchangeRate: "1" }
+                : {}),
+            }
+          : line,
+      ),
+    );
+  return (
+    <Modal
+      title={`Edit ${invoice.invoiceNumber || invoice.draftReference}`}
+      wide
+      close={close}
+    >
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          save({
+            invoiceDate: String(data.get("invoiceDate")),
+            dueDate: nullable(data, "dueDate"),
+            customerName: String(data.get("customerName")),
+            customerTrn: String(data.get("customerTrn")),
+            customerVatNumber: String(data.get("customerVatNumber")),
+            customerAddress: nullable(data, "customerAddress"),
+            remarks: nullable(data, "remarks"),
+            lines,
+          });
+        }}
+      >
+        <p className="form-help">
+          The invoice number and {invoice.status.toLowerCase()} status remain unchanged. Every revision is audit logged.
+        </p>
+        <div className="two">
+          <Field label="Invoice date">
+            <input
+              name="invoiceDate"
+              type="date"
+              required
+              defaultValue={invoice.invoiceDate || new Date().toISOString().slice(0, 10)}
+            />
+          </Field>
+          <Field label="Due date">
+            <input name="dueDate" type="date" defaultValue={invoice.dueDate || ""} />
+          </Field>
+        </div>
+        <Field label="Bill to">
+          <input name="customerName" required defaultValue={invoice.customerName} />
+        </Field>
+        <div className="two">
+          <Field label="TRN number">
+            <input name="customerTrn" required maxLength={32} defaultValue={invoice.customerTrn || ""} />
+          </Field>
+          <Field label="VAT number">
+            <input name="customerVatNumber" required maxLength={32} defaultValue={invoice.customerVatNumber || ""} />
+          </Field>
+        </div>
+        <Field label="Billing address">
+          <textarea name="customerAddress" rows={2} defaultValue={invoice.customerAddress || ""} />
+        </Field>
+        <div className="invoice-edit-lines">
+          <h3>Invoice charges</h3>
+          {lines.map((line, index) => {
+            const tax = taxes.find((item) => item.id === line.taxRateId);
+            const amounts = chargeAmounts(
+              Number(line.quantity),
+              Number(line.unitRate),
+              Number(line.exchangeRate),
+              Number(tax?.rate || 0),
+            );
+            return (
+              <section className="invoice-edit-line" key={line.id}>
+                <b>{invoice.lines[index]?.serviceName}</b>
+                <Field label="Description">
+                  <input required value={line.description} onChange={(event) => updateLine(index, "description", event.target.value)} />
+                </Field>
+                <div className="invoice-line-fields">
+                  <Field label="Quantity">
+                    <input required type="number" min="0.001" step="0.001" value={line.quantity} onChange={(event) => updateLine(index, "quantity", event.target.value)} />
+                  </Field>
+                  <Field label="Unit">
+                    <input required maxLength={16} value={line.uom} onChange={(event) => updateLine(index, "uom", event.target.value)} />
+                  </Field>
+                  <Field label="Currency">
+                    <select value={line.currency} onChange={(event) => updateLine(index, "currency", event.target.value)}><option>AED</option><option>USD</option></select>
+                  </Field>
+                  <Field label={`Rate (${line.currency})`}>
+                    <input required type="number" min="0" step="0.01" value={line.unitRate} onChange={(event) => updateLine(index, "unitRate", event.target.value)} />
+                  </Field>
+                  <Field label="AED exchange rate">
+                    <input required type="number" min="0.00000001" step="0.00000001" disabled={line.currency === "AED"} value={line.currency === "AED" ? "1" : line.exchangeRate} onChange={(event) => updateLine(index, "exchangeRate", event.target.value)} />
+                  </Field>
+                  <Field label="VAT">
+                    <select required value={line.taxRateId} onChange={(event) => updateLine(index, "taxRateId", event.target.value)}>{taxes.map((item) => <option key={item.id} value={item.id}>{item.rate}%</option>)}</select>
+                  </Field>
+                </div>
+                <small className="input-help">Revised total: {money.format(amounts.totalAed)}</small>
+              </section>
+            );
+          })}
+        </div>
+        <Field label="Additional remarks">
+          <textarea name="remarks" rows={3} maxLength={1500} defaultValue={invoice.remarks || ""} />
+        </Field>
+        <FormButtons label="Save invoice revision" close={close} />
+      </form>
+    </Modal>
+  );
+}
+
 function PortDialog({
   initial,
   close,
@@ -2751,8 +2933,10 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
           <dl>
             <dt>Region</dt>
             <dd>{invoice.branchName}</dd>
-            <dt>VAT ID (TRN)</dt>
+            <dt>TRN</dt>
             <dd>{invoice.customerTrn || "—"}</dd>
+            <dt>VAT ID</dt>
+            <dd>{invoice.customerVatNumber || "—"}</dd>
             <dt>Place of Supply</dt>
             <dd>{invoice.branchName}</dd>
             <dt>Due Date</dt>
@@ -2895,8 +3079,6 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
               <td>{printAmount(line.netAmount)}</td>
               <td>
                 {printAmount(line.netAmount)}
-                <br />
-                {line.taxCode}
               </td>
               <td>{line.taxRate}%</td>
               <td>{printAmount(line.vatAmount)}</td>
@@ -2928,7 +3110,7 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
           <tbody>
             {taxGroups.map((group) => (
               <tr key={`${group.code}-${group.rate}`}>
-                <td>{group.code}</td>
+                <td>{Number(group.rate) === 0 ? "0% VAT" : `VAT ${group.rate}%`}</td>
                 <td>{printAmount(group.taxable)}</td>
                 <td>{group.rate}</td>
                 <td>{printAmount(group.vat)}</td>
@@ -2945,12 +3127,17 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
           <dd>{printAmount(invoice.total)} AED</dd>
         </dl>
         <p>
-          <b>In Words:</b> AED {printAmount(invoice.total)} ONLY
+          <b>In Words:</b> AED {aedAmountInWords(invoice.total)}
         </p>
       </div>
       <footer className="invoice-footer">
         <section>
           <h2>Remarks</h2>
+          {invoice.remarks && <p>{invoice.remarks}</p>}
+          <ul>
+            <li>This is a system-generated invoice. No signature or stamp is required.</li>
+            <li>The company is not responsible for any cash settlement made without an official receipt.</li>
+          </ul>
         </section>
         <section>
           <h2>Bank Details</h2>
