@@ -3100,10 +3100,11 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
               Amount (AED)
             </th>
             <th>
-              Taxable Value/
+              Taxable
               <br />
-              VAT Group
+              Value
             </th>
+            <th>VAT Group</th>
             <th>
               VAT
               <br />
@@ -3143,6 +3144,7 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
               <td>
                 {printAmount(line.netAmount)}
               </td>
+              <td>{line.taxCode || `VAT${line.taxRate}%`}</td>
               <td>{line.taxRate}%</td>
               <td>{printAmount(line.vatAmount)}</td>
               <td>{printAmount(line.totalAmount)}</td>
@@ -3154,6 +3156,7 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
             <td colSpan={5}></td>
             <td>{printAmount(invoice.subtotal)}</td>
             <td>{printAmount(invoice.subtotal)}</td>
+            <td></td>
             <td></td>
             <td>{printAmount(invoice.vatAmount)}</td>
             <td>{printAmount(invoice.total)}</td>
