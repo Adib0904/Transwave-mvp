@@ -27,7 +27,7 @@ values
 on conflict (provider_id, provider) do nothing;
 
 insert into public.companies (id, legal_name, trade_name, trn, address) values
-  ('20000000-0000-4000-8000-000000000001', 'TransWave Shipping LLC', 'TransWave', '100000000000003', 'Dubai, United Arab Emirates'),
+  ('20000000-0000-4000-8000-000000000001', 'TransWave Shipping LLC', 'TransWave', '105303929100003', 'SHARJAH FREE ZONE, UAE'),
   ('20000000-0000-4000-8000-000000000002', 'Second Company LLC', 'SecondCo', '100000000000004', 'Abu Dhabi, United Arab Emirates');
 
 insert into public.company_members (company_id, user_id, role) values
@@ -35,7 +35,7 @@ insert into public.company_members (company_id, user_id, role) values
   ('20000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000002', 'VIEWER');
 
 insert into public.branches (id, company_id, code, name, emirate, address, trn) values
-  ('21000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'DXB', 'Dubai', 'Dubai', 'Dubai, United Arab Emirates', '100000000000003'),
+  ('21000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', 'DXB', 'Dubai', 'Dubai', 'SHARJAH FREE ZONE, UAE', '105303929100003'),
   ('21000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000002', 'AUH', 'Abu Dhabi', 'Abu Dhabi', 'Abu Dhabi, United Arab Emirates', '100000000000004');
 
 insert into public.currencies (code, name, decimal_places) values

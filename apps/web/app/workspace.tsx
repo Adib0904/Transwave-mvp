@@ -48,6 +48,7 @@ import {
   formatChargeRate,
   type ChargeCurrency,
 } from "./charge-money";
+import { shouldUppercaseApplicationInput } from "./text-input";
 import "./invoice-flow.css";
 import "./job-editor.css";
 
@@ -111,6 +112,20 @@ const weightInKg = (data: FormData, name: string, unitName: string) => {
     ? null
     : value * (String(data.get(unitName)) === "MT" ? 1000 : 1);
 };
+
+function uppercaseApplicationInput(event: FormEvent<HTMLElement>) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+  if (!shouldUppercaseApplicationInput(target.tagName, target.type, target.dataset.keepCase === "true")) return;
+  const uppercase = target.value.toUpperCase();
+  if (uppercase === target.value) return;
+  const selectionStart = target.selectionStart;
+  const selectionEnd = target.selectionEnd;
+  target.value = uppercase;
+  if (selectionStart !== null && selectionEnd !== null) {
+    target.setSelectionRange(selectionStart, selectionEnd);
+  }
+}
 
 export function Workspace() {
   const router = useRouter();
@@ -334,7 +349,7 @@ export function Workspace() {
     .join("")
     .toUpperCase();
   return (
-    <main className="app-shell">
+    <main className="app-shell" onInputCapture={uppercaseApplicationInput}>
       <aside className="side">
         <div className="logo">
           <img
@@ -997,7 +1012,7 @@ function Jobs(props: {
               value={
                 selected.packageCount === null
                   ? "Not captured"
-                  : String(selected.packageCount)
+                  : `${selected.packageCount} CNT`
               }
             />
             <Detail
@@ -2076,7 +2091,7 @@ function JobEditor({
               defaultValue={initial?.plannedContainerCount || 1}
             />
           </Field>
-          <Field label="No. of packages">
+          <Field label="No. of packages (CNT)">
             <input
               name="packageCount"
               type="number"
@@ -2367,8 +2382,16 @@ function ChargeDialog({
             <input
               name="uom"
               required
+              list="charge-units"
               defaultValue={item.charge?.uom || item.service.defaultUom}
             />
+            <datalist id="charge-units">
+              <option value="CNT" />
+              <option value="CNTR" />
+              <option value="JOB" />
+              <option value="PCS" />
+              <option value="PKG" />
+            </datalist>
           </Field>
         </div>
         <div className="three">
@@ -3052,7 +3075,7 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
           <dt>Package Type</dt>
           <dd>{invoice.plannedContainerType}</dd>
           <dt>No. of Packages</dt>
-          <dd>{invoice.packageCount ?? "—"}</dd>
+          <dd>{invoice.packageCount === null ? "—" : `${invoice.packageCount} CNT`}</dd>
           <dt>HBL</dt>
           <dd>{invoice.hbl || "—"}</dd>
           <dt>MBL</dt>
