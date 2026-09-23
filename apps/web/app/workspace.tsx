@@ -3144,7 +3144,11 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
               <td>
                 {printAmount(line.netAmount)}
               </td>
-              <td>{line.taxCode || `VAT${line.taxRate}%`}</td>
+              <td>
+                {Number(line.taxRate) === 0
+                  ? "VAT 0%"
+                  : line.taxCode || `VAT ${line.taxRate}%`}
+              </td>
               <td>{line.taxRate}%</td>
               <td>{printAmount(line.vatAmount)}</td>
               <td>{printAmount(line.totalAmount)}</td>
