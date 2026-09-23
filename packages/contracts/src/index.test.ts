@@ -8,6 +8,7 @@ import {
   normalizeServiceName,
   saveContainerSchema,
   saveVendorBillSchema,
+  updateInvoiceSchema,
 } from "./index.js";
 
 test("calculates net, VAT and total using line-first monetary rounding", () => {
@@ -96,4 +97,34 @@ test("accepts only PDF vendor document metadata", () => {
     }).success,
     false,
   );
+});
+
+test("allows invoice revisions without customer TRN or VAT number", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const result = updateInvoiceSchema.safeParse({
+    invoiceDate: "2026-09-23",
+    dueDate: null,
+    customerName: "CUSTOMER LLC",
+    customerTrn: "",
+    customerVatNumber: null,
+    customerAddress: null,
+    remarks: null,
+    lines: [
+      {
+        id,
+        description: "OCEAN FREIGHT",
+        quantity: "1",
+        uom: "CNT",
+        currency: "AED",
+        exchangeRate: "1",
+        unitRate: "100.00",
+        taxRateId: id,
+      },
+    ],
+  });
+  assert.equal(result.success, true);
+  if (result.success) {
+    assert.equal(result.data.customerTrn, null);
+    assert.equal(result.data.customerVatNumber, null);
+  }
 });

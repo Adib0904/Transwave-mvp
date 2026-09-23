@@ -1435,8 +1435,8 @@ export type Database = {
         Args: {
           p_customer_address: string | null
           p_customer_name: string
-          p_customer_trn: string
-          p_customer_vat_number: string
+          p_customer_trn: string | null
+          p_customer_vat_number: string | null
           p_due_date: string | null
           p_invoice_date: string
           p_invoice_id: string

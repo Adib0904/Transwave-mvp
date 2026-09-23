@@ -1012,7 +1012,7 @@ function Jobs(props: {
               value={
                 selected.packageCount === null
                   ? "Not captured"
-                  : `${selected.packageCount} CNT`
+                  : `${selected.packageCount} PKGS`
               }
             />
             <Detail
@@ -2091,7 +2091,7 @@ function JobEditor({
               defaultValue={initial?.plannedContainerCount || 1}
             />
           </Field>
-          <Field label="No. of packages (CNT)">
+          <Field label="No. of packages (PKGS)">
             <input
               name="packageCount"
               type="number"
@@ -2383,7 +2383,8 @@ function ChargeDialog({
               name="uom"
               required
               list="charge-units"
-              defaultValue={item.charge?.uom || item.service.defaultUom}
+              readOnly={item.service.code.toUpperCase() === "OCEAN"}
+              defaultValue={item.service.code.toUpperCase() === "OCEAN" ? "CNT" : item.charge?.uom || item.service.defaultUom}
             />
             <datalist id="charge-units">
               <option value="CNT" />
@@ -2563,7 +2564,7 @@ function InvoiceEditDialog({
       id: line.id,
       description: line.description,
       quantity: line.quantity,
-      uom: line.uom,
+      uom: line.serviceCode.toUpperCase() === "OCEAN" ? "CNT" : line.uom,
       currency: line.currency as "AED" | "USD",
       exchangeRate: line.exchangeRate,
       unitRate: line.unitRate,
@@ -2605,8 +2606,8 @@ function InvoiceEditDialog({
             invoiceDate: String(data.get("invoiceDate")),
             dueDate: nullable(data, "dueDate"),
             customerName: String(data.get("customerName")),
-            customerTrn: String(data.get("customerTrn")),
-            customerVatNumber: String(data.get("customerVatNumber")),
+            customerTrn: nullable(data, "customerTrn"),
+            customerVatNumber: nullable(data, "customerVatNumber"),
             customerAddress: nullable(data, "customerAddress"),
             remarks: nullable(data, "remarks"),
             lines,
@@ -2634,10 +2635,10 @@ function InvoiceEditDialog({
         </Field>
         <div className="two">
           <Field label="TRN number">
-            <input name="customerTrn" required maxLength={32} defaultValue={invoice.customerTrn || ""} />
+            <input name="customerTrn" maxLength={32} defaultValue={invoice.customerTrn || ""} />
           </Field>
           <Field label="VAT number">
-            <input name="customerVatNumber" required maxLength={32} defaultValue={invoice.customerVatNumber || ""} />
+            <input name="customerVatNumber" maxLength={32} defaultValue={invoice.customerVatNumber || ""} />
           </Field>
         </div>
         <Field label="Billing address">
@@ -2664,7 +2665,7 @@ function InvoiceEditDialog({
                     <input required type="number" min="0.001" step="0.001" value={line.quantity} onChange={(event) => updateLine(index, "quantity", event.target.value)} />
                   </Field>
                   <Field label="Unit">
-                    <input required maxLength={16} value={line.uom} onChange={(event) => updateLine(index, "uom", event.target.value)} />
+                    <input required maxLength={16} readOnly={invoice.lines[index]?.serviceCode.toUpperCase() === "OCEAN"} value={line.uom} onChange={(event) => updateLine(index, "uom", event.target.value)} />
                   </Field>
                   <Field label="Currency">
                     <select value={line.currency} onChange={(event) => updateLine(index, "currency", event.target.value)}><option>AED</option><option>USD</option></select>
@@ -3075,7 +3076,7 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
           <dt>Package Type</dt>
           <dd>{invoice.plannedContainerType}</dd>
           <dt>No. of Packages</dt>
-          <dd>{invoice.packageCount === null ? "—" : `${invoice.packageCount} CNT`}</dd>
+          <dd>{invoice.packageCount === null ? "—" : `${invoice.packageCount} PKGS`}</dd>
           <dt>HBL</dt>
           <dd>{invoice.hbl || "—"}</dd>
           <dt>MBL</dt>
