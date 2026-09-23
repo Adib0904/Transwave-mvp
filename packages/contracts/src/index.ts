@@ -157,12 +157,40 @@ export const taxRateSchema = z.object({
   id: uuidSchema,
   code: z.string(),
   rate: decimalSchema,
+  category: z.enum(["STANDARD", "ZERO_RATED", "EXEMPT", "OUT_OF_SCOPE"]),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable(),
 });
 export const branchSchema = z.object({
   id: uuidSchema,
   code: z.string(),
   name: z.string(),
+  emirate: z.string(),
+  address: z.string().nullable(),
+  trn: z.string().nullable(),
   active: z.boolean(),
+});
+
+const taxRateInputSchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(32),
+  category: z.enum(["STANDARD", "ZERO_RATED", "EXEMPT", "OUT_OF_SCOPE"]),
+  rate: z.number().min(0).max(100),
+  effectiveFrom: z.iso.date(),
+  effectiveTo: z.union([z.iso.date(), z.null()]).default(null),
+});
+export const saveTaxRateSchema = taxRateInputSchema.refine((value) => !value.effectiveTo || value.effectiveTo >= value.effectiveFrom, {
+  message: "Effective-to date must be on or after the effective-from date",
+  path: ["effectiveTo"],
+});
+export const updateTaxRateSchema = taxRateInputSchema.partial();
+
+export const saveBranchSchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(32),
+  name: z.string().trim().min(1).max(160),
+  emirate: z.string().trim().min(1).max(80),
+  address: z.string().trim().max(500).nullable().default(null),
+  trn: z.string().trim().max(32).nullable().default(null),
+  active: z.boolean().default(true),
 });
 
 export const serviceSchema = z.object({
@@ -633,6 +661,8 @@ export type SaveCustomer = z.infer<typeof saveCustomerSchema>;
 export type SaveVendor = z.infer<typeof saveVendorSchema>;
 export type SavePort = z.infer<typeof savePortSchema>;
 export type SaveService = z.infer<typeof saveServiceSchema>;
+export type SaveTaxRate = z.infer<typeof saveTaxRateSchema>;
+export type SaveBranch = z.infer<typeof saveBranchSchema>;
 export type Container = z.infer<typeof containerSchema>;
 export type Charge = z.infer<typeof chargeSchema>;
 export type JobSummary = z.infer<typeof jobSummarySchema>;

@@ -6,7 +6,7 @@ loadEnvFile("apps/api/.env");
 const supabaseUrl = process.env.SUPABASE_URL;
 const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
 const secretKey = process.env.SUPABASE_SECRET_KEY;
-const apiBase = "http://127.0.0.1:3001/api/v1";
+const apiBase = process.env.SECURITY_API_BASE ?? "http://127.0.0.1:3001/api/v1";
 
 if (!supabaseUrl || !publishableKey || !secretKey) throw new Error("Local security test environment is not configured");
 
@@ -87,12 +87,12 @@ try {
   const masters = await api("/masters", adminToken);
   assert(masters.response.status === 200, "Master data was not returned");
   const serviceInput = {
-    code: "SECURITY_TEST",
-    name: "Security test service",
-    defaultUom: "JOB",
-    defaultCurrency: "AED",
-    defaultTaxRateId: masters.body.taxRates[0].id,
-    active: true
+    code: masters.body.services[0].code,
+    name: masters.body.services[0].name,
+    defaultUom: masters.body.services[0].defaultUom,
+    defaultCurrency: masters.body.services[0].defaultCurrency,
+    defaultTaxRateId: masters.body.services[0].defaultTaxRateId,
+    active: masters.body.services[0].active
   };
 
   await setMembership(companyId, userId, { role: "OPERATIONS" });
@@ -100,9 +100,18 @@ try {
     method: "POST",
     body: JSON.stringify({ jobId: testJobId, chargeIds: ["00000000-0000-4000-8000-000000000001"] })
   });
-  assert(operationDraft.response.status === 403, "Operations role was allowed to create an invoice draft");
+  assert(operationDraft.response.status !== 403, "Operations role was blocked from creating an invoice draft");
   const operationSetup = await api("/masters/services", adminToken, { method: "POST", body: JSON.stringify(serviceInput) });
-  assert(operationSetup.response.status === 403, "Operations role was allowed to change protected setup");
+  assert(operationSetup.response.status !== 403, "Operations role was blocked from changing protected setup");
+  const operationUsers = await api("/users", adminToken);
+  assert(operationUsers.response.status === 200, "Operations role was blocked from managing portal users");
+  const operationOwnerEscalation = await api(`/users/${userId}`, adminToken, {
+    method: "PATCH",
+    body: JSON.stringify({ role: "OWNER" })
+  });
+  assert(operationOwnerEscalation.response.status === 403, "Operations role was allowed to grant owner access");
+  const operationVendorBills = await api("/vendor-bills", adminToken);
+  assert(operationVendorBills.response.status === 200, "Operations role was blocked from viewing vendor costs and profit");
 
   await setMembership(companyId, userId, { role: "FINANCE" });
   const jobDetail = await api(`/jobs/${testJobId}`, adminToken);
@@ -143,7 +152,8 @@ console.log(JSON.stringify({
   authentication: "passed",
   activeMembership: "passed",
   tenantIsolation: "passed",
-  roleSeparation: "passed",
+  operationsCombinedAccess: "passed",
+  financeRoleSeparation: "passed",
   ownerEscalationProtection: "passed",
   invoiceSnapshotProtection: "passed",
   responseHeaders: "passed"

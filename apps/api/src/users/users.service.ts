@@ -114,7 +114,7 @@ export class UsersService {
 
   private async requireAdministrator(database: TransWaveDatabaseClient, actorId: string) {
     const tenant = await resolveTenant(database, actorId);
-    if (tenant.role !== "OWNER" && tenant.role !== "ADMIN") throw new ForbiddenException("Only owners and administrators can manage users");
+    if (!["OWNER", "ADMIN", "OPERATIONS"].includes(tenant.role)) throw new ForbiddenException("Only owners, administrators and operations users can manage users");
     return tenant;
   }
 

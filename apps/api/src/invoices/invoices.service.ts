@@ -35,7 +35,7 @@ export class InvoicesService {
   }
 
   async createDraft(database: TransWaveDatabaseClient, userId: string, jobId: string, chargeIds: string[]): Promise<Invoice> {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const { data: invoiceId, error } = await database.rpc("create_invoice_draft", {
       p_job_id: jobId,
       p_charge_ids: chargeIds
@@ -45,14 +45,14 @@ export class InvoicesService {
   }
 
   async issue(database: TransWaveDatabaseClient, userId: string, id: string): Promise<Invoice> {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const { error } = await database.rpc("issue_invoice", { p_invoice_id: id });
     if (error) throwDatabaseError(error);
     return this.findOne(database, id);
   }
 
   async update(database: TransWaveDatabaseClient, userId: string, id: string, input: UpdateInvoice): Promise<Invoice> {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const { error } = await database.rpc("update_invoice", {
       p_invoice_id: id,
       p_invoice_date: input.invoiceDate,

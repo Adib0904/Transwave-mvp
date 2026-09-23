@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import type { Customer, MasterData, Port, SaveCustomer, SavePort, SaveService, SaveVendor, Vendor } from "@transwave/contracts";
+import type { Customer, MasterData, Port, SaveBranch, SaveCustomer, SavePort, SaveService, SaveTaxRate, SaveVendor, Vendor } from "@transwave/contracts";
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal } from "../common/format.js";
@@ -23,8 +23,8 @@ export class MastersService {
       database.from("vendors").select("*").order("legal_name"),
       database.from("ports").select("*").order("name"),
       database.from("services").select("*").order("name"),
-      database.from("tax_rates").select("id, code, rate").order("rate"),
-      database.from("branches").select("id, code, name, active").order("code"),
+      database.from("tax_rates").select("id, code, category, rate, effective_from, effective_to").order("rate"),
+      database.from("branches").select("id, code, name, emirate, address, trn, active").order("code"),
       database.from("currencies").select("code").order("code")
     ]);
     for (const result of [customers, vendors, ports, services, taxRates, branches, currencies]) if (result.error) throwDatabaseError(result.error);
@@ -33,20 +33,20 @@ export class MastersService {
       vendors: (vendors.data ?? []).map(mapVendor),
       ports: (ports.data ?? []).map(row => mapPort(row, tenant.companyId)),
       services: (services.data ?? []).map(mapService),
-      taxRates: (taxRates.data ?? []).map(row => ({ id: row.id, code: row.code, rate: decimal(row.rate) })),
+      taxRates: (taxRates.data ?? []).map(row => ({ id: row.id, code: row.code, category: row.category, rate: decimal(row.rate), effectiveFrom: row.effective_from, effectiveTo: row.effective_to })),
       branches: branches.data ?? [],
       currencies: (currencies.data ?? []).map(row => row.code.trim())
     };
   }
 
   async createVendor(database: TransWaveDatabaseClient, userId: string, input: SaveVendor) {
-    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const result = await database.from("vendors").insert({ company_id: tenant.companyId, legal_name: input.name, trn: input.trn, email: input.email, phone: input.phone, address: input.address, default_currency: input.defaultCurrency, payment_terms_days: input.paymentTermsDays, active: input.active }).select("*").single();
     return mapVendor(requireData(result.data, result.error, "Vendor was not created"));
   }
 
   async updateVendor(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SaveVendor>) {
-    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const values: Database["public"]["Tables"]["vendors"]["Update"] = {};
     if (input.name !== undefined) values.legal_name = input.name;
     if (input.trn !== undefined) values.trn = input.trn;
@@ -83,13 +83,13 @@ export class MastersService {
   }
 
   async createPort(database: TransWaveDatabaseClient, userId: string, input: SavePort) {
-    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN"]);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
     const result = await database.from("ports").insert({ company_id: tenant.companyId, un_locode: input.unLocode, name: input.name, country_code: input.countryCode, active: input.active }).select("*").single();
     return mapPort(requireData(result.data, result.error, "Port was not created"), tenant.companyId);
   }
 
   async updatePort(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SavePort>) {
-    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN"]);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
     const values: Database["public"]["Tables"]["ports"]["Update"] = {};
     if (input.unLocode !== undefined) values.un_locode = input.unLocode;
     if (input.name !== undefined) values.name = input.name;
@@ -101,13 +101,13 @@ export class MastersService {
   }
 
   async createService(database: TransWaveDatabaseClient, userId: string, input: SaveService) {
-    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN"]);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
     const result = await database.from("services").insert({ company_id: tenant.companyId, code: input.code, name: input.name, default_uom: input.defaultUom, default_currency: input.defaultCurrency, default_tax_rate_id: input.defaultTaxRateId, active: input.active }).select("*").single();
     return mapService(requireData(result.data, result.error, "Service was not created"));
   }
 
   async updateService(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SaveService>) {
-    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN"]);
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
     const values: Database["public"]["Tables"]["services"]["Update"] = {};
     if (input.code !== undefined) values.code = input.code;
     if (input.name !== undefined) values.name = input.name;
@@ -117,5 +117,44 @@ export class MastersService {
     if (input.active !== undefined) values.active = input.active;
     const result = await database.from("services").update(values).eq("id", id).eq("company_id", tenant.companyId).select("*").maybeSingle();
     return mapService(requireData(result.data, result.error, "Service not found"));
+  }
+
+  async createBranch(database: TransWaveDatabaseClient, userId: string, input: SaveBranch) {
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const result = await database.from("branches").insert({ company_id: tenant.companyId, code: input.code, name: input.name, emirate: input.emirate, address: input.address, trn: input.trn, active: input.active }).select("id, code, name, emirate, address, trn, active").single();
+    return requireData(result.data, result.error, "Branch was not created");
+  }
+
+  async updateBranch(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SaveBranch>) {
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const values: Database["public"]["Tables"]["branches"]["Update"] = {};
+    if (input.code !== undefined) values.code = input.code;
+    if (input.name !== undefined) values.name = input.name;
+    if (input.emirate !== undefined) values.emirate = input.emirate;
+    if (input.address !== undefined) values.address = input.address;
+    if (input.trn !== undefined) values.trn = input.trn;
+    if (input.active !== undefined) values.active = input.active;
+    const result = await database.from("branches").update(values).eq("id", id).eq("company_id", tenant.companyId).select("id, code, name, emirate, address, trn, active").maybeSingle();
+    return requireData(result.data, result.error, "Branch not found");
+  }
+
+  async createTaxRate(database: TransWaveDatabaseClient, userId: string, input: SaveTaxRate) {
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const result = await database.from("tax_rates").insert({ company_id: tenant.companyId, code: input.code, category: input.category, rate: input.rate, effective_from: input.effectiveFrom, effective_to: input.effectiveTo }).select("id, code, category, rate, effective_from, effective_to").single();
+    const row = requireData(result.data, result.error, "Tax rate was not created");
+    return { id: row.id, code: row.code, category: row.category, rate: decimal(row.rate), effectiveFrom: row.effective_from, effectiveTo: row.effective_to };
+  }
+
+  async updateTaxRate(database: TransWaveDatabaseClient, userId: string, id: string, input: Partial<SaveTaxRate>) {
+    const tenant = await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const values: Database["public"]["Tables"]["tax_rates"]["Update"] = {};
+    if (input.code !== undefined) values.code = input.code;
+    if (input.category !== undefined) values.category = input.category;
+    if (input.rate !== undefined) values.rate = input.rate;
+    if (input.effectiveFrom !== undefined) values.effective_from = input.effectiveFrom;
+    if (input.effectiveTo !== undefined) values.effective_to = input.effectiveTo;
+    const result = await database.from("tax_rates").update(values).eq("id", id).eq("company_id", tenant.companyId).select("id, code, category, rate, effective_from, effective_to").maybeSingle();
+    const row = requireData(result.data, result.error, "Tax rate not found");
+    return { id: row.id, code: row.code, category: row.category, rate: decimal(row.rate), effectiveFrom: row.effective_from, effectiveTo: row.effective_to };
   }
 }

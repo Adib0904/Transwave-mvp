@@ -38,25 +38,25 @@ export class VendorBillsService {
   }
 
   async create(database: TransWaveDatabaseClient, userId: string, input: SaveVendorBill) {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const id = await this.save(database, null, input);
     return this.findOne(database, id);
   }
 
   async update(database: TransWaveDatabaseClient, userId: string, id: string, input: SaveVendorBill) {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     await this.save(database, id, input);
     return this.findOne(database, id);
   }
 
   async remove(database: TransWaveDatabaseClient, userId: string, id: string) {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const { error } = await database.rpc("delete_vendor_bill", { p_id: id });
     if (error) throwDatabaseError(error);
   }
 
   async attachDocument(database: TransWaveDatabaseClient, userId: string, id: string, input: AttachVendorDocument) {
-    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "FINANCE"]);
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
     const { error } = await database.rpc("attach_vendor_bill_document", {
       p_id: id,
       p_storage_path: input.storagePath,

@@ -17,6 +17,8 @@ import type {
   UpdateInvoice,
   SaveVendor,
   SaveVendorBill,
+  SaveBranch,
+  SaveTaxRate,
   Vendor,
   VendorBill,
 } from "@transwave/contracts";
@@ -58,6 +60,8 @@ type Dialog =
   | "invoiceEdit"
   | "port"
   | "service"
+  | "branch"
+  | "taxRate"
   | "user"
   | "vendor"
   | "vendorBill"
@@ -128,6 +132,8 @@ export function Workspace() {
   const [editingService, setEditingService] = useState<
     MasterData["services"][number] | null
   >(null);
+  const [editingBranch, setEditingBranch] = useState<MasterData["branches"][number] | null>(null);
+  const [editingTaxRate, setEditingTaxRate] = useState<MasterData["taxRates"][number] | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
@@ -141,13 +147,13 @@ export function Workspace() {
   const canManageOperations = ["OWNER", "ADMIN", "OPERATIONS"].includes(
     user?.role ?? "VIEWER",
   );
-  const canManageBilling = ["OWNER", "ADMIN", "FINANCE"].includes(
+  const canManageBilling = ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"].includes(
     user?.role ?? "VIEWER",
   );
   const canManageCharges = ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"].includes(
     user?.role ?? "VIEWER",
   );
-  const canManageSetup = ["OWNER", "ADMIN"].includes(user?.role ?? "VIEWER");
+  const canManageSetup = ["OWNER", "ADMIN", "OPERATIONS"].includes(user?.role ?? "VIEWER");
 
   const load = useCallback((): Promise<void> => {
     if (!session || !user) return Promise.resolve();
@@ -159,7 +165,7 @@ export function Workspace() {
       api.jobs(session),
       api.invoices(session),
       api.vendorBills(session),
-      ["OWNER", "ADMIN"].includes(user.role)
+      ["OWNER", "ADMIN", "OPERATIONS"].includes(user.role)
         ? api.users(session)
         : Promise.resolve([]),
     ])
@@ -311,7 +317,7 @@ export function Workspace() {
     selectedJob?.charges.filter((charge) => !charge.invoiceId) ?? [];
 
   const pages = (Object.keys(icons) as NavigationPage[]).filter(
-    (item) => item !== "Users" || ["OWNER", "ADMIN"].includes(user.role),
+    (item) => item !== "Users" || ["OWNER", "ADMIN", "OPERATIONS"].includes(user.role),
   );
   const managedProfile = users.find((item) => item.id === user.userId);
   const profileName =
@@ -576,6 +582,11 @@ export function Workspace() {
                 api.updateService(session, value.id, { active: !value.active }),
               )
             }
+            onNewBranch={() => { setEditingBranch(null); setDialog("branch"); }}
+            onEditBranch={(value) => { setEditingBranch(value); setDialog("branch"); }}
+            onToggleBranch={(value) => void act(() => api.updateBranch(session, value.id, { active: !value.active }))}
+            onNewTaxRate={() => { setEditingTaxRate(null); setDialog("taxRate"); }}
+            onEditTaxRate={(value) => { setEditingTaxRate(value); setDialog("taxRate"); }}
           />
         )}
         {page === "Users" && (
@@ -706,6 +717,24 @@ export function Workspace() {
               ? confirmAction({ title: "Save service changes?", message: `Update ${editingService.name}?`, confirmLabel: "Save changes" }, () => api.updateService(session, editingService.id, input))
               : act(() => api.createService(session, input)))
           }
+        />
+      )}
+      {dialog === "branch" && (
+        <BranchDialog
+          initial={editingBranch}
+          close={() => setDialog(null)}
+          save={(input) => void (editingBranch
+            ? confirmAction({ title: "Save branch changes?", message: `Update ${editingBranch.name}?`, confirmLabel: "Save changes" }, () => api.updateBranch(session, editingBranch.id, input))
+            : act(() => api.createBranch(session, input)))}
+        />
+      )}
+      {dialog === "taxRate" && (
+        <TaxRateDialog
+          initial={editingTaxRate}
+          close={() => setDialog(null)}
+          save={(input) => void (editingTaxRate
+            ? confirmAction({ title: "Save tax rate changes?", message: `Update ${editingTaxRate.code}? Existing invoice snapshots will not change.`, confirmLabel: "Save changes" }, () => api.updateTaxRate(session, editingTaxRate.id, input))
+            : act(() => api.createTaxRate(session, input)))}
         />
       )}
       {dialog === "user" && (
@@ -1378,6 +1407,11 @@ function Masters({
   onNewService,
   onEditService,
   onToggleService,
+  onNewBranch,
+  onEditBranch,
+  onToggleBranch,
+  onNewTaxRate,
+  onEditTaxRate,
 }: {
   data: MasterData;
   canEdit: boolean;
@@ -1387,6 +1421,11 @@ function Masters({
   onNewService(): void;
   onEditService(s: MasterData["services"][number]): void;
   onToggleService(s: MasterData["services"][number]): void;
+  onNewBranch(): void;
+  onEditBranch(branch: MasterData["branches"][number]): void;
+  onToggleBranch(branch: MasterData["branches"][number]): void;
+  onNewTaxRate(): void;
+  onEditTaxRate(taxRate: MasterData["taxRates"][number]): void;
 }) {
   return (
     <div className="master-grid">
@@ -1460,16 +1499,16 @@ function Masters({
           ))}
         </div>
       </Panel>
-      <Panel title="Company setup" sub="Authenticated tenant configuration">
-        <Detail
-          label="Branches"
-          value={data.branches.map((b) => b.name).join(" · ")}
-        />
+      <Panel title="Branches" sub="Company locations used on jobs and invoices" action={canEdit ? "+ Add branch" : undefined} onAction={onNewBranch}>
+        <div className="record-list">
+          {data.branches.map((branch) => <div key={branch.id}><span><b>{branch.name}</b><small>{branch.code} · {branch.emirate}</small></span><Tag text={branch.active ? "ACTIVE" : "INACTIVE"}/>{canEdit&&<><button className="link-button" onClick={()=>onEditBranch(branch)}>Edit</button><button className="danger-link" onClick={()=>onToggleBranch(branch)}>{branch.active?"Deactivate":"Activate"}</button></>}</div>)}
+        </div>
+      </Panel>
+      <Panel title="Tax rates" sub="VAT defaults for services and new charges" action={canEdit ? "+ Add tax rate" : undefined} onAction={onNewTaxRate}>
+        <div className="record-list">
+          {data.taxRates.map((tax) => <div key={tax.id}><span><b>{tax.code} · {tax.rate}%</b><small>{label(tax.category)} · from {tax.effectiveFrom}</small></span>{canEdit&&<button className="link-button" onClick={()=>onEditTaxRate(tax)}>Edit</button>}</div>)}
+        </div>
         <Detail label="Currencies" value={data.currencies.join(" · ")} />
-        <Detail
-          label="Tax rates"
-          value={data.taxRates.map((t) => `${t.code} ${t.rate}%`).join(" · ")}
-        />
       </Panel>
     </div>
   );
@@ -1498,8 +1537,8 @@ function Users({
       onAction={onNew}
     >
       <p className="form-help">
-        Owners and administrators can create accounts, assign roles and suspend
-        access. Only an owner can grant or change owner access.
+        Owners, administrators and operations users can create accounts, assign
+        non-owner roles and suspend access. Only an owner can grant or change owner access.
       </p>
       <div className="user-table">
         <div className="user-row heading">
@@ -2767,6 +2806,30 @@ function ServiceDialog({
   );
 }
 
+function BranchDialog({ initial, close, save }: { initial: MasterData["branches"][number] | null; close(): void; save(value: SaveBranch): void }) {
+  return <Modal title={initial ? "Edit branch" : "Add branch"} close={close}>
+    <form onSubmit={(event) => { event.preventDefault(); const d = new FormData(event.currentTarget); save({ code: String(d.get("code")).toUpperCase(), name: String(d.get("name")), emirate: String(d.get("emirate")), address: nullable(d, "address"), trn: nullable(d, "trn"), active: initial?.active ?? true }); }}>
+      <div className="two"><Field label="Branch code"><input name="code" required defaultValue={initial?.code}/></Field><Field label="Branch name"><input name="name" required defaultValue={initial?.name}/></Field></div>
+      <Field label="Emirate"><input name="emirate" required defaultValue={initial?.emirate}/></Field>
+      <Field label="TRN (optional)"><input name="trn" defaultValue={initial?.trn || ""}/></Field>
+      <Field label="Address (optional)"><textarea name="address" rows={3} defaultValue={initial?.address || ""}/></Field>
+      <FormButtons label="Save branch" close={close}/>
+    </form>
+  </Modal>;
+}
+
+function TaxRateDialog({ initial, close, save }: { initial: MasterData["taxRates"][number] | null; close(): void; save(value: SaveTaxRate): void }) {
+  return <Modal title={initial ? "Edit tax rate" : "Add tax rate"} close={close}>
+    <form onSubmit={(event) => { event.preventDefault(); const d = new FormData(event.currentTarget); save({ code: String(d.get("code")).toUpperCase(), category: String(d.get("category")) as SaveTaxRate["category"], rate: Number(d.get("rate")), effectiveFrom: String(d.get("effectiveFrom")), effectiveTo: nullable(d, "effectiveTo") }); }}>
+      <div className="two"><Field label="Tax code"><input name="code" required defaultValue={initial?.code}/></Field><Field label="Rate (%)"><input name="rate" required type="number" min="0" max="100" step="0.01" defaultValue={initial?.rate}/></Field></div>
+      <Field label="Category"><select name="category" defaultValue={initial?.category || "STANDARD"}><option value="STANDARD">Standard</option><option value="ZERO_RATED">Zero rated</option><option value="EXEMPT">Exempt</option><option value="OUT_OF_SCOPE">Out of scope</option></select></Field>
+      <div className="two"><Field label="Effective from"><input name="effectiveFrom" required type="date" defaultValue={initial?.effectiveFrom || new Date().toISOString().slice(0,10)}/></Field><Field label="Effective to (optional)"><input name="effectiveTo" type="date" min={initial?.effectiveFrom} defaultValue={initial?.effectiveTo || ""}/></Field></div>
+      <p className="form-help">Issued invoices keep their saved tax values. This default applies to future charges.</p>
+      <FormButtons label="Save tax rate" close={close}/>
+    </form>
+  </Modal>;
+}
+
 function UserDialog({
   initial,
   canAssignOwner,
@@ -2851,8 +2914,8 @@ function UserDialog({
         <div className="role-guide">
           <b>Role access</b>
           <small>
-            Owner/Admin: users and full setup · Operations: operational data ·
-            Finance: job charges and invoices · Viewer: read only
+            Owner: full control including owner access · Admin/Operations: users,
+            operations, billing and setup · Finance: job charges and invoices · Viewer: read only
           </small>
         </div>
         <FormButtons

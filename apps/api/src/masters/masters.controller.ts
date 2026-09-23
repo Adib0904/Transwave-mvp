@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
-import { saveCustomerSchema, savePortSchema, saveServiceSchema, saveVendorSchema, type SaveCustomer, type SavePort, type SaveService, type SaveVendor } from "@transwave/contracts";
+import { saveBranchSchema, saveCustomerSchema, savePortSchema, saveServiceSchema, saveTaxRateSchema, saveVendorSchema, updateTaxRateSchema, type SaveBranch, type SaveCustomer, type SavePort, type SaveService, type SaveTaxRate, type SaveVendor } from "@transwave/contracts";
 import { SupabaseAuthGuard } from "../auth/supabase-auth.guard.js";
 import type { AuthenticatedRequest } from "../auth/authenticated-request.js";
 import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
@@ -21,4 +21,8 @@ export class MastersController {
   @Patch("ports/:id") updatePort(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(savePortSchema.partial())) input: Partial<SavePort>) { return this.masters.updatePort(request.database, request.auth.userId, id, input); }
   @Post("services") createService(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveServiceSchema)) input: SaveService) { return this.masters.createService(request.database, request.auth.userId, input); }
   @Patch("services/:id") updateService(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveServiceSchema.partial())) input: Partial<SaveService>) { return this.masters.updateService(request.database, request.auth.userId, id, input); }
+  @Post("branches") createBranch(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveBranchSchema)) input: SaveBranch) { return this.masters.createBranch(request.database, request.auth.userId, input); }
+  @Patch("branches/:id") updateBranch(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveBranchSchema.partial())) input: Partial<SaveBranch>) { return this.masters.updateBranch(request.database, request.auth.userId, id, input); }
+  @Post("tax-rates") createTaxRate(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveTaxRateSchema)) input: SaveTaxRate) { return this.masters.createTaxRate(request.database, request.auth.userId, input); }
+  @Patch("tax-rates/:id") updateTaxRate(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(updateTaxRateSchema)) input: Partial<SaveTaxRate>) { return this.masters.updateTaxRate(request.database, request.auth.userId, id, input); }
 }
