@@ -1334,25 +1334,15 @@ function Invoices({
                 Edit invoice
               </button>
             )}
-            {selected.status === "DRAFT" && (
-              <button
-                className="soft"
-                onClick={() => printInvoice(invoicePrintTitle(selected))}
-              >
-                Preview invoice
-              </button>
-            )}
+            <button
+              className="soft"
+              onClick={() => printInvoice(invoicePrintTitle(selected))}
+            >
+              Preview invoice
+            </button>
             {canIssue && selected.status === "DRAFT" && (
               <button className="button" onClick={onIssue}>
                 Issue invoice
-              </button>
-            )}
-            {selected.status === "ISSUED" && (
-              <button
-                className="button"
-                onClick={() => printInvoice(invoicePrintTitle(selected))}
-              >
-                Print / Save PDF
               </button>
             )}
           </div>
