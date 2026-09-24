@@ -7,6 +7,9 @@ import {
   createManagedUserSchema,
   normalizeServiceName,
   saveContainerSchema,
+  saveCustomerSchema,
+  saveServiceSchema,
+  saveVendorSchema,
   saveVendorBillSchema,
   updateInvoiceSchema,
 } from "./index.js";
@@ -127,4 +130,26 @@ test("allows invoice revisions without customer TRN or VAT number", () => {
     assert.equal(result.data.customerTrn, null);
     assert.equal(result.data.customerVatNumber, null);
   }
+});
+
+test("allows customers without tax IDs and defaults new master records to USD", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const customer = saveCustomerSchema.parse({
+    name: "CUSTOMER LLC",
+    trn: "",
+    vatNumber: null,
+    email: null,
+  });
+  const vendor = saveVendorSchema.parse({ name: "VENDOR LLC", email: null });
+  const service = saveServiceSchema.parse({
+    code: "OCEAN",
+    name: "OCEAN FREIGHT",
+    defaultUom: "CNT",
+    defaultTaxRateId: id,
+  });
+  assert.equal(customer.trn, null);
+  assert.equal(customer.vatNumber, null);
+  assert.equal(customer.defaultCurrency, "USD");
+  assert.equal(vendor.defaultCurrency, "USD");
+  assert.equal(service.defaultCurrency, "USD");
 });

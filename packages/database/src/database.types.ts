@@ -1507,6 +1507,7 @@ export type Database = {
           p_chargeable_weight_kg: number
           p_commodity: string
           p_consignee: string
+          p_container_numbers: string[]
           p_customer_id: string
           p_customer_reference: string
           p_customs_doc_reference: string

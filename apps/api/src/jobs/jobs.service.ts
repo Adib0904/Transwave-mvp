@@ -561,10 +561,9 @@ export class JobsService {
   }
 
   private updateRpcInput(input: SaveJob): Omit<UpdateJobArgs, "p_job_id"> {
-    const values: Partial<Omit<CreateJobArgs, "p_company_id">> = {
+    const values: Omit<CreateJobArgs, "p_company_id"> = {
       ...this.rpcInput(input),
     };
-    delete values.p_container_numbers;
-    return values as Omit<UpdateJobArgs, "p_job_id">;
+    return values;
   }
 }

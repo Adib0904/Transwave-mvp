@@ -80,6 +80,8 @@ const money = new Intl.NumberFormat("en-AE", {
   style: "currency",
   currency: "AED",
 });
+const metricTonnes = (kilograms: number) =>
+  `${(kilograms / 1000).toLocaleString("en-US", { maximumFractionDigits: 3 })} MT`;
 const icons: Record<NavigationPage, string> = {
   Dashboard: "▦",
   Customers: "◎",
@@ -909,7 +911,7 @@ function Customers({
               <b>{c.name}</b>
               <small>{c.code}</small>
             </div>
-            <span>{c.trn && c.vatNumber ? `${c.trn} / ${c.vatNumber}` : "Tax details required"}</span>
+            <span>{c.trn || c.vatNumber ? [c.trn, c.vatNumber].filter(Boolean).join(" / ") : "Tax details not provided"}</span>
             <span>{c.defaultCurrency}</span>
             <span>{c.paymentTermsDays} days</span>
             <Tag text={c.active ? "ACTIVE" : "INACTIVE"} />
@@ -1035,7 +1037,7 @@ function Jobs(props: {
               label="Weight / volume"
               value={
                 [
-                  selected.weightKg === null ? null : `${selected.weightKg} kg`,
+                  selected.weightKg === null ? null : metricTonnes(selected.weightKg),
                   selected.volumeCbm === null
                     ? null
                     : `${selected.volumeCbm} CBM`,
@@ -1049,7 +1051,7 @@ function Jobs(props: {
               value={
                 selected.chargeableWeightKg === null
                   ? "Not captured"
-                  : `${selected.chargeableWeightKg} kg`
+                  : metricTonnes(selected.chargeableWeightKg)
               }
             />
             <Detail
@@ -1332,6 +1334,14 @@ function Invoices({
                 Edit invoice
               </button>
             )}
+            {selected.status === "DRAFT" && (
+              <button
+                className="soft"
+                onClick={() => printInvoice(invoicePrintTitle(selected))}
+              >
+                Preview invoice
+              </button>
+            )}
             {canIssue && selected.status === "DRAFT" && (
               <button className="button" onClick={onIssue}>
                 Issue invoice
@@ -1379,15 +1389,15 @@ function Costs({ bills, vendors, selected, canEdit, onOpen, onEdit, onDelete, on
 type VendorBillLineDraft = SaveVendorBill["lines"][number] & { key: string };
 const newVendorBillLine = (): VendorBillLineDraft => ({ key: crypto.randomUUID(), serviceId: null, description: "", quantity: "1", uom: "JOB", currency: "USD", exchangeRate: "3.685", unitRate: "0", taxRate: "0" });
 
-function VendorDialog({initial,close,save}:{initial:Vendor|null;close():void;save(value:SaveVendor):void}) { return <Modal title={initial?"Edit vendor":"Add vendor"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),address:nullable(d,"address"),defaultCurrency:String(d.get("currency")) as "AED"|"USD",paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Vendor ID</span><b>{initial?.code||"Created automatically"}</b><small>Vendor invoices and costs remain linked to this record.</small></div><Field label="Legal name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="TRN / VAT number"><input name="trn" defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Address"><textarea name="address" rows={3} defaultValue={initial?.address||""}/></Field><div className="three"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Default currency"><select name="currency" defaultValue={initial?.defaultCurrency||"AED"}><option>AED</option><option>USD</option></select></Field><Field label="Payment terms"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field></div><FormButtons label="Save vendor" close={close}/></form></Modal>; }
+function VendorDialog({initial,close,save}:{initial:Vendor|null;close():void;save(value:SaveVendor):void}) { return <Modal title={initial?"Edit vendor":"Add vendor"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),address:nullable(d,"address"),defaultCurrency:String(d.get("currency")) as "AED"|"USD",paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Vendor ID</span><b>{initial?.code||"Created automatically"}</b><small>Vendor invoices and costs remain linked to this record.</small></div><Field label="Legal name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="TRN / VAT number"><input name="trn" defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Address"><textarea name="address" rows={3} defaultValue={initial?.address||""}/></Field><div className="three"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Default currency"><select name="currency" defaultValue={initial?.defaultCurrency||"USD"}><option>USD</option><option>AED</option></select></Field><Field label="Payment terms"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field></div><FormButtons label="Save vendor" close={close}/></form></Modal>; }
 
 function NewVendorInvoiceEditor({data,jobs,invoices,draftOwner,close,save}:{data:MasterData;jobs:JobSummary[];invoices:Invoice[];draftOwner:string;close():void;save(value:SaveVendorBill,file:File):Promise<boolean>}) {
   const [vendorId,setVendorId]=useState("");
   const [jobId,setJobId]=useState("");
   const [customerInvoiceId,setCustomerInvoiceId]=useState("");
   const [totalAmount,setTotalAmount]=useState("");
-  const [currency,setCurrency]=useState<"AED"|"USD">("AED");
-  const [exchangeRate,setExchangeRate]=useState("1");
+  const [currency,setCurrency]=useState<"AED"|"USD">("USD");
+  const [exchangeRate,setExchangeRate]=useState("3.685");
   const [remarks,setRemarks]=useState("");
   const [document,setDocument]=useState<File|null>(null);
   const [restoredAt,setRestoredAt]=useState("");
@@ -1646,8 +1656,8 @@ function CustomerDialog({
           const d = new FormData(event.currentTarget);
           save({
             name: String(d.get("name")),
-            trn: String(d.get("trn")),
-            vatNumber: String(d.get("vatNumber")),
+            trn: nullable(d, "trn"),
+            vatNumber: nullable(d, "vatNumber"),
             email: nullable(d, "email"),
             phone: nullable(d, "phone"),
             billingAddress: nullable(d, "address"),
@@ -1673,7 +1683,6 @@ function CustomerDialog({
           <Field label="TRN number">
             <input
               name="trn"
-              required
               maxLength={32}
               defaultValue={initial?.trn || ""}
             />
@@ -1682,7 +1691,6 @@ function CustomerDialog({
           <Field label="VAT number">
             <input
               name="vatNumber"
-              required
               maxLength={32}
               defaultValue={initial?.vatNumber || ""}
             />
@@ -1701,7 +1709,7 @@ function CustomerDialog({
           <Field label="Currency">
             <select
               name="currency"
-              defaultValue={initial?.defaultCurrency || "AED"}
+              defaultValue={initial?.defaultCurrency || "USD"}
             >
               {currencies.map((v) => (
                 <option key={v}>{v}</option>
@@ -1742,7 +1750,9 @@ function JobEditor({
     initial?.services.map((s) => s.id) ?? [],
   );
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
-  const [detectedContainers, setDetectedContainers] = useState(0);
+  const [detectedContainers, setDetectedContainers] = useState(
+    initial?.containers.length ?? 0,
+  );
 
   useEffect(() => {
     if (initial || !formRef.current) return;
@@ -2147,30 +2157,24 @@ function JobEditor({
             defaultValue={initial?.chargeableWeightKg}
           />
         </div>
-        {!initial && (
-          <Field label="Container manifest">
-            <textarea
-              name="containerNumbers"
-              rows={5}
-              placeholder="DOLU2008497 / 20SD   CRXU3126290 / 20SD"
-              onInput={(event) => event.currentTarget.setCustomValidity("")}
-            />
-            <small className="input-help">
-              {detectedContainers
-                ? `${detectedContainers} unique container${detectedContainers === 1 ? "" : "s"} detected. `
-                : ""}
-              Paste numbers with spaces, lines, commas or equipment labels such
-              as / 20SD. Equipment labels are ignored and the container count
-              updates automatically.
-            </small>
-          </Field>
-        )}
-        {initial && (
-          <p className="form-help">
-            Actual container numbers are managed in the Containers section on
-            the job page.
-          </p>
-        )}
+        <Field label="Container manifest">
+          <textarea
+            name="containerNumbers"
+            rows={5}
+            placeholder="DOLU2008497 / 20SD   CRXU3126290 / 20SD"
+            defaultValue={initial?.containers
+              .map((container) => container.containerNumber)
+              .join("\n")}
+            onInput={(event) => event.currentTarget.setCustomValidity("")}
+          />
+          <small className="input-help">
+            {detectedContainers
+              ? `${detectedContainers} unique container${detectedContainers === 1 ? "" : "s"} detected. `
+              : ""}
+            Paste or update the complete container list. Existing seal numbers
+            are preserved for container numbers that remain in the list.
+          </small>
+        </Field>
       </FormSection>
       <FormSection title="Services required" note="Select one or more services">
         <div className="service-picker-head">
@@ -2331,12 +2335,16 @@ function ChargeDialog({
     (value): value is ChargeCurrency => value === "AED" || value === "USD",
   );
   const [currency, setCurrency] = useState<ChargeCurrency>(
-    item.charge?.currency === "USD" ? "USD" : "AED",
+    (item.charge?.currency ?? "USD") as ChargeCurrency,
   );
   const [quantity, setQuantity] = useState(item.charge?.quantity || "1");
   const [unitRate, setUnitRate] = useState(item.charge?.unitRate || "");
   const [exchangeRate, setExchangeRate] = useState(
-    item.charge?.currency === "USD" ? item.charge.exchangeRate : "1",
+    item.charge
+      ? item.charge.currency === "USD"
+        ? item.charge.exchangeRate
+        : "1"
+      : "3.685",
   );
   const [taxId, setTaxId] = useState(
     taxes.find((t) => t.rate === item.charge?.taxRate)?.id ||
@@ -2828,7 +2836,7 @@ function ServiceDialog({
           <Field label="Currency">
             <select
               name="currency"
-              defaultValue={initial?.defaultCurrency || "AED"}
+              defaultValue={initial?.defaultCurrency || "USD"}
             >
               {data.currencies.map((v) => (
                 <option key={v}>{v}</option>
@@ -3052,7 +3060,7 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
             <dt>Place of Supply</dt>
             <dd>{invoice.branchName}</dd>
             <dt>Due Date</dt>
-            <dd>{printDate(invoice.dueDate)}</dd>
+            <dd>{invoice.dueDate ? printDate(invoice.dueDate) : ""}</dd>
           </dl>
         </section>
       </div>
@@ -3106,12 +3114,12 @@ function PersistedPrint({ invoice }: { invoice: Invoice }) {
           <dd>{invoice.hbl || "—"}</dd>
           <dt>MBL</dt>
           <dd>{invoice.mbl || "—"}</dd>
-          <dt>Weight (KGS)</dt>
-          <dd>{invoice.weightKg ?? "—"}</dd>
+          <dt>Weight (MT)</dt>
+          <dd>{invoice.weightKg === null ? "—" : metricTonnes(invoice.weightKg)}</dd>
           <dt>Volume (CBM)</dt>
           <dd>{invoice.volumeCbm ?? "—"}</dd>
-          <dt>Chargeable Weight</dt>
-          <dd>{invoice.chargeableWeightKg ?? "—"}</dd>
+          <dt>Chargeable Weight (MT)</dt>
+          <dd>{invoice.chargeableWeightKg === null ? "—" : metricTonnes(invoice.chargeableWeightKg)}</dd>
           <dt>Customs Doc Ref</dt>
           <dd>{invoice.customsDocReference || "—"}</dd>
           <dt>Terms of Shipment</dt>
@@ -3471,18 +3479,21 @@ function WeightField({
           type="number"
           min="0"
           step="0.001"
-          defaultValue={defaultValue ?? ""}
+          inputMode="decimal"
+          defaultValue={defaultValue == null ? "" : defaultValue / 1000}
         />
         <select
           name={unitName}
-          defaultValue="KG"
+          defaultValue="MT"
           aria-label={`${heading} unit`}
         >
-          <option value="KG">KG</option>
           <option value="MT">MT</option>
+          <option value="KG">KG</option>
         </select>
       </div>
-      <small className="input-help">Choose kilograms or metric tonnes.</small>
+      <small className="input-help">
+        Decimals are accepted. Metric tonnes are selected by default.
+      </small>
     </Field>
   );
 }

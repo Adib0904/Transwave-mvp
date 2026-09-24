@@ -27,7 +27,7 @@ values
 on conflict (provider_id, provider) do nothing;
 
 insert into public.companies (id, legal_name, trade_name, trn, address) values
-  ('20000000-0000-4000-8000-000000000001', 'TransWave Shipping LLC', 'TransWave', '105303929100003', 'SHARJAH FREE ZONE, UAE'),
+  ('20000000-0000-4000-8000-000000000001', 'Transwave Shipping and Logistics LLC', 'Transwave Shipping and Logistics', '105303929100003', 'SHARJAH FREE ZONE, UAE'),
   ('20000000-0000-4000-8000-000000000002', 'Second Company LLC', 'SecondCo', '100000000000004', 'Abu Dhabi, United Arab Emirates');
 
 insert into public.company_members (company_id, user_id, role) values

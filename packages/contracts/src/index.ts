@@ -85,14 +85,20 @@ export const customerSchema = z.object({
 
 export const saveCustomerSchema = z.object({
   name: z.string().trim().min(1).max(200),
-  trn: z.string().trim().min(1, "TRN number is required").max(32),
-  vatNumber: z.string().trim().min(1, "VAT number is required").max(32),
+  trn: z
+    .union([z.string().trim().max(32), z.null()])
+    .transform((value) => value || null)
+    .default(null),
+  vatNumber: z
+    .union([z.string().trim().max(32), z.null()])
+    .transform((value) => value || null)
+    .default(null),
   email: z
     .union([z.string().trim().email(), z.literal(""), z.null()])
     .transform((value) => value || null),
   phone: z.string().trim().max(32).nullable().default(null),
   billingAddress: z.string().trim().max(500).nullable().default(null),
-  defaultCurrency: currencySchema.default("AED"),
+  defaultCurrency: currencySchema.default("USD"),
   paymentTermsDays: z.number().int().min(0).max(365).default(30),
   active: z.boolean().default(true),
 });
@@ -118,7 +124,7 @@ export const saveVendorSchema = z.object({
     .transform((value) => value || null),
   phone: z.string().trim().max(32).nullable().default(null),
   address: z.string().trim().max(500).nullable().default(null),
-  defaultCurrency: z.enum(["AED", "USD"]).default("AED"),
+  defaultCurrency: z.enum(["AED", "USD"]).default("USD"),
   paymentTermsDays: z.number().int().min(0).max(365).default(30),
   active: z.boolean().default(true),
 });
@@ -148,7 +154,7 @@ export const saveServiceSchema = z.object({
   code: z.string().trim().toUpperCase().min(1).max(32),
   name: z.string().trim().min(1).max(160),
   defaultUom: z.string().trim().toUpperCase().min(1).max(16),
-  defaultCurrency: currencySchema.default("AED"),
+  defaultCurrency: currencySchema.default("USD"),
   defaultTaxRateId: uuidSchema,
   active: z.boolean().default(true),
 });
