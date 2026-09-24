@@ -1418,6 +1418,7 @@ export type Database = {
         }
         Returns: string
       }
+      create_similar_job: { Args: { p_source_job_id: string }; Returns: string }
       delete_vendor_bill: { Args: { p_id: string }; Returns: undefined }
       has_company_role: {
         Args: {

@@ -31,6 +31,12 @@ export class JobsController {
     return this.jobs.findOne(request.database, id);
   }
 
+  @Post(":id/similar")
+  @ApiOperation({ summary: "Create a draft job by copying shipment details, services and charges without containers" })
+  createSimilar(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) {
+    return this.jobs.createSimilar(request.database, request.auth.userId, id);
+  }
+
   @Patch(":id")
   @ApiOperation({ summary: "Update all editable job and route details" })
   update(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveJobSchema)) input: SaveJob) {

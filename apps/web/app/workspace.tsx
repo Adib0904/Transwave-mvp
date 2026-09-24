@@ -542,8 +542,24 @@ export function Workspace() {
             invoices={invoices}
             selected={selectedInvoice}
             canIssue={canManageBilling}
+            canCreateSimilar={canManageOperations}
             onEdit={() => setDialog("invoiceEdit")}
             onOpen={openInvoice}
+            onCreateSimilar={() =>
+              selectedInvoice &&
+              void confirmAction(
+                {
+                  title: "Create a similar job?",
+                  message: `Copy customer, shipment, services and charges from ${selectedInvoice.jobNumber}. Container numbers will start empty so you can enter the new ones.`,
+                  confirmLabel: "Create similar job",
+                },
+                () => api.createSimilarJob(session, selectedInvoice.jobId),
+                (value) => {
+                  setSelectedJob(value);
+                  goTo("Jobs");
+                },
+              )
+            }
             onIssue={() =>
               selectedInvoice &&
               void act(
@@ -1199,14 +1215,18 @@ function Invoices({
   invoices,
   selected,
   canIssue,
+  canCreateSimilar,
   onOpen,
+  onCreateSimilar,
   onEdit,
   onIssue,
 }: {
   invoices: Invoice[];
   selected: Invoice | null;
   canIssue: boolean;
+  canCreateSimilar: boolean;
   onOpen(id: string): void;
+  onCreateSimilar(): void;
   onEdit(): void;
   onIssue(): void;
 }) {
@@ -1302,6 +1322,11 @@ function Invoices({
             </strong>
           </div>
           <div className="form-actions">
+            {canCreateSimilar && (
+              <button className="soft" onClick={onCreateSimilar}>
+                Create similar job
+              </button>
+            )}
             {canIssue && (
               <button className="soft" onClick={onEdit}>
                 Edit invoice

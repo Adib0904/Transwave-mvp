@@ -82,6 +82,22 @@ export class JobsService {
     );
   }
 
+  async createSimilar(
+    database: TransWaveDatabaseClient,
+    userId: string,
+    sourceJobId: string,
+  ): Promise<JobDetail> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const { data, error } = await database.rpc("create_similar_job", {
+      p_source_job_id: sourceJobId,
+    });
+    if (error) throwDatabaseError(error);
+    return this.findOne(
+      database,
+      requireData(data, null, "Similar job was not created"),
+    );
+  }
+
   async addContainer(
     database: TransWaveDatabaseClient,
     userId: string,
