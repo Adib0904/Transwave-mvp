@@ -1,5 +1,5 @@
 "use client";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { createContext, FormEvent, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type {
   Charge,
@@ -76,6 +76,7 @@ type Confirmation = {
   run(): Promise<void>;
   cancel(): void;
 };
+const InlineEditorContext = createContext(false);
 const money = new Intl.NumberFormat("en-AE", {
   style: "currency",
   currency: "AED",
@@ -171,6 +172,23 @@ export function Workspace() {
     user?.role ?? "VIEWER",
   );
   const canManageSetup = ["OWNER", "ADMIN", "OPERATIONS"].includes(user?.role ?? "VIEWER");
+  const editorPage: NavigationPage | null =
+    dialog === "job" || (dialog === "charge" && Boolean(chargeService?.charge))
+      ? "Jobs"
+      : dialog === "invoiceEdit"
+        ? "Invoices"
+        : dialog === "vendorBill" || (dialog === "vendor" && Boolean(editingVendor))
+          ? "Costs"
+          : dialog === "customer" && editingCustomer
+            ? "Customers"
+            : (dialog === "port" && editingPort) ||
+                (dialog === "service" && editingService) ||
+                (dialog === "branch" && editingBranch) ||
+                (dialog === "taxRate" && editingTaxRate)
+              ? "Masters"
+              : dialog === "user" && editingUser
+                ? "Users"
+                : null;
 
   const load = useCallback((): Promise<void> => {
     if (!session || !user) return Promise.resolve();
@@ -304,7 +322,7 @@ export function Workspace() {
   }
   const nav = (next: Page) => {
     goTo(next);
-    setDialog(null);
+    if (!editorPage) setDialog(null);
     setProfileOpen(false);
     setError("");
   };
@@ -395,7 +413,7 @@ export function Workspace() {
           </button>
         </div>
       </aside>
-      <section className="workspace">
+      <section className="workspace" hidden={editorPage === page}>
         <header>
           <div>
             <p className="kicker">{user.companyName}</p>
@@ -644,33 +662,37 @@ export function Workspace() {
         )}
       </section>
       {dialog === "customer" && (
-        <CustomerDialog
-          initial={editingCustomer}
-          currencies={masters.currencies}
-          close={() => setDialog(null)}
-          save={(input) =>
-            void (editingCustomer
-              ? confirmAction({ title: "Save customer changes?", message: `Update the saved details for ${editingCustomer.name}?`, confirmLabel: "Save changes" }, () => api.updateCustomer(session, editingCustomer.id, input))
-              : act(() => api.createCustomer(session, input)))
-          }
-        />
+        <EditorSurface inline={editorPage === "Customers"} visible={page === "Customers"}>
+          <CustomerDialog
+            initial={editingCustomer}
+            currencies={masters.currencies}
+            close={() => setDialog(null)}
+            save={(input) =>
+              void (editingCustomer
+                ? confirmAction({ title: "Save customer changes?", message: `Update the saved details for ${editingCustomer.name}?`, confirmLabel: "Save changes" }, () => api.updateCustomer(session, editingCustomer.id, input))
+                : act(() => api.createCustomer(session, input)))
+            }
+          />
+        </EditorSurface>
       )}
       {dialog === "job" && selectedJob && (
-        <JobEditor
-          initial={selectedJob}
-          data={masters}
-          draftOwner={user.userId}
-          close={() => setDialog(null)}
-          save={(input) =>
-            confirmAction({ title: "Save job changes?", message: `Update ${selectedJob.jobNumber} with these details?`, confirmLabel: "Save changes" },
-              () => api.updateJob(session, selectedJob.id, input),
-              (value) => {
-                setSelectedJob(value);
-                goTo("Jobs");
-              },
-            )
-          }
-        />
+        <EditorSurface inline visible={page === "Jobs"}>
+          <JobEditor
+            initial={selectedJob}
+            data={masters}
+            draftOwner={user.userId}
+            close={() => setDialog(null)}
+            save={(input) =>
+              confirmAction({ title: "Save job changes?", message: `Update ${selectedJob.jobNumber} with these details?`, confirmLabel: "Save changes" },
+                () => api.updateJob(session, selectedJob.id, input),
+                (value) => {
+                  setSelectedJob(value);
+                  goTo("Jobs");
+                },
+              )
+            }
+          />
+        </EditorSurface>
       )}
       {dialog === "container" && selectedJob && (
         <ContainerDialog
@@ -684,17 +706,19 @@ export function Workspace() {
         />
       )}
       {dialog === "charge" && selectedJob && chargeService && (
-        <ChargeDialog
-          item={chargeService}
-          taxes={masters.taxRates}
-          currencies={masters.currencies}
-          close={() => setDialog(null)}
-          save={(input) =>
-            void (chargeService.charge
-              ? confirmAction({ title: "Update charge?", message: `Save the revised ${chargeService.service.name} charge?`, confirmLabel: "Update charge" }, () => api.saveCharge(session, selectedJob.id, input), setSelectedJob)
-              : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob))
-          }
-        />
+        <EditorSurface inline={Boolean(chargeService.charge)} visible={page === "Jobs"}>
+          <ChargeDialog
+            item={chargeService}
+            taxes={masters.taxRates}
+            currencies={masters.currencies}
+            close={() => setDialog(null)}
+            save={(input) =>
+              void (chargeService.charge
+                ? confirmAction({ title: "Update charge?", message: `Save the revised ${chargeService.service.name} charge?`, confirmLabel: "Update charge" }, () => api.saveCharge(session, selectedJob.id, input), setSelectedJob)
+                : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob))
+            }
+          />
+        </EditorSurface>
       )}
       {dialog === "invoice" && selectedJob && (
         <InvoiceDialog
@@ -712,108 +736,125 @@ export function Workspace() {
         />
       )}
       {dialog === "invoiceEdit" && selectedInvoice && (
-        <InvoiceEditDialog
-          invoice={selectedInvoice}
-          taxes={masters.taxRates}
-          close={() => setDialog(null)}
-          save={(input) =>
-            void confirmAction(
-              {
-                title: "Save invoice revision?",
-                message: `${selectedInvoice.invoiceNumber || selectedInvoice.draftReference} will keep its number and status. The change will be recorded in the audit log.`,
-                confirmLabel: "Save revision",
-              },
-              () => api.updateInvoice(session, selectedInvoice.id, input),
-              setSelectedInvoice,
-            )
-          }
-        />
+        <EditorSurface inline visible={page === "Invoices"}>
+          <InvoiceEditDialog
+            invoice={selectedInvoice}
+            customers={masters.customers}
+            taxes={masters.taxRates}
+            close={() => setDialog(null)}
+            save={(input) =>
+              void confirmAction(
+                {
+                  title: "Save invoice revision?",
+                  message: `${selectedInvoice.invoiceNumber || selectedInvoice.draftReference} will keep its number and status. The change will be recorded in the audit log.`,
+                  confirmLabel: "Save revision",
+                },
+                () => api.updateInvoice(session, selectedInvoice.id, input),
+                setSelectedInvoice,
+              )
+            }
+          />
+        </EditorSurface>
       )}
       {dialog === "port" && (
-        <PortDialog
-          initial={editingPort}
-          close={() => setDialog(null)}
-          save={(input) =>
-            void (editingPort
-              ? confirmAction({ title: "Save port changes?", message: `Update ${editingPort.name}?`, confirmLabel: "Save changes" }, () => api.updatePort(session, editingPort.id, input))
-              : act(() => api.createPort(session, input)))
-          }
-        />
+        <EditorSurface inline={Boolean(editingPort)} visible={page === "Masters"}>
+          <PortDialog
+            initial={editingPort}
+            close={() => setDialog(null)}
+            save={(input) =>
+              void (editingPort
+                ? confirmAction({ title: "Save port changes?", message: `Update ${editingPort.name}?`, confirmLabel: "Save changes" }, () => api.updatePort(session, editingPort.id, input))
+                : act(() => api.createPort(session, input)))
+            }
+          />
+        </EditorSurface>
       )}
       {dialog === "service" && (
-        <ServiceDialog
-          initial={editingService}
-          data={masters}
-          close={() => setDialog(null)}
-          save={(input) =>
-            void (editingService
-              ? confirmAction({ title: "Save service changes?", message: `Update ${editingService.name}?`, confirmLabel: "Save changes" }, () => api.updateService(session, editingService.id, input))
-              : act(() => api.createService(session, input)))
-          }
-        />
+        <EditorSurface inline={Boolean(editingService)} visible={page === "Masters"}>
+          <ServiceDialog
+            initial={editingService}
+            data={masters}
+            close={() => setDialog(null)}
+            save={(input) =>
+              void (editingService
+                ? confirmAction({ title: "Save service changes?", message: `Update ${editingService.name}?`, confirmLabel: "Save changes" }, () => api.updateService(session, editingService.id, input))
+                : act(() => api.createService(session, input)))
+            }
+          />
+        </EditorSurface>
       )}
       {dialog === "branch" && (
-        <BranchDialog
-          initial={editingBranch}
-          close={() => setDialog(null)}
-          save={(input) => void (editingBranch
-            ? confirmAction({ title: "Save branch changes?", message: `Update ${editingBranch.name}?`, confirmLabel: "Save changes" }, () => api.updateBranch(session, editingBranch.id, input))
-            : act(() => api.createBranch(session, input)))}
-        />
+        <EditorSurface inline={Boolean(editingBranch)} visible={page === "Masters"}>
+          <BranchDialog
+            initial={editingBranch}
+            close={() => setDialog(null)}
+            save={(input) => void (editingBranch
+              ? confirmAction({ title: "Save branch changes?", message: `Update ${editingBranch.name}?`, confirmLabel: "Save changes" }, () => api.updateBranch(session, editingBranch.id, input))
+              : act(() => api.createBranch(session, input)))}
+          />
+        </EditorSurface>
       )}
       {dialog === "taxRate" && (
-        <TaxRateDialog
-          initial={editingTaxRate}
-          close={() => setDialog(null)}
-          save={(input) => void (editingTaxRate
-            ? confirmAction({ title: "Save tax rate changes?", message: `Update ${editingTaxRate.code}? Existing invoice snapshots will not change.`, confirmLabel: "Save changes" }, () => api.updateTaxRate(session, editingTaxRate.id, input))
-            : act(() => api.createTaxRate(session, input)))}
-        />
+        <EditorSurface inline={Boolean(editingTaxRate)} visible={page === "Masters"}>
+          <TaxRateDialog
+            initial={editingTaxRate}
+            close={() => setDialog(null)}
+            save={(input) => void (editingTaxRate
+              ? confirmAction({ title: "Save tax rate changes?", message: `Update ${editingTaxRate.code}? Existing invoice snapshots will not change.`, confirmLabel: "Save changes" }, () => api.updateTaxRate(session, editingTaxRate.id, input))
+              : act(() => api.createTaxRate(session, input)))}
+          />
+        </EditorSurface>
       )}
       {dialog === "user" && (
-        <UserDialog
-          initial={editingUser}
-          canAssignOwner={user.role === "OWNER"}
-          close={() => setDialog(null)}
-          save={(input) =>
-            void (editingUser
-              ? confirmAction({ title: "Save user changes?", message: `Update access and profile details for ${editingUser.name}?`, confirmLabel: "Save changes" }, () => api.updateUser(
-                    session,
-                    editingUser.id,
-                    input as UpdateManagedUser,
-                  ))
-              : act(() => api.createUser(session, input as CreateManagedUser)))
-          }
-        />
+        <EditorSurface inline={Boolean(editingUser)} visible={page === "Users"}>
+          <UserDialog
+            initial={editingUser}
+            canAssignOwner={user.role === "OWNER"}
+            close={() => setDialog(null)}
+            save={(input) =>
+              void (editingUser
+                ? confirmAction({ title: "Save user changes?", message: `Update access and profile details for ${editingUser.name}?`, confirmLabel: "Save changes" }, () => api.updateUser(
+                      session,
+                      editingUser.id,
+                      input as UpdateManagedUser,
+                    ))
+                : act(() => api.createUser(session, input as CreateManagedUser)))
+            }
+          />
+        </EditorSurface>
       )}
       {dialog === "vendor" && (
-        <VendorDialog
-          initial={editingVendor}
-          close={() => setDialog(null)}
-          save={(input) => void (editingVendor ? confirmAction({ title: "Save vendor changes?", message: `Update ${editingVendor.name}?`, confirmLabel: "Save changes" }, () => api.updateVendor(session, editingVendor.id, input)) : act(() => api.createVendor(session, input)))}
-        />
+        <EditorSurface inline={Boolean(editingVendor)} visible={page === "Costs"}>
+          <VendorDialog
+            initial={editingVendor}
+            close={() => setDialog(null)}
+            save={(input) => void (editingVendor ? confirmAction({ title: "Save vendor changes?", message: `Update ${editingVendor.name}?`, confirmLabel: "Save changes" }, () => api.updateVendor(session, editingVendor.id, input)) : act(() => api.createVendor(session, input)))}
+          />
+        </EditorSurface>
       )}
       {dialog === "vendorBill" && (
-        <VendorBillDialog
-          initial={selectedVendorBill}
-          data={masters}
-          jobs={jobs}
-          invoices={invoices}
-          bills={vendorBills}
-          close={() => setDialog(null)}
-          save={(input, file) => void confirmAction({ title: "Save vendor invoice changes?", message: "The expense, links and uploaded document will be updated.", confirmLabel: "Save changes" }, async () => {
-            const saved = selectedVendorBill
-              ? await api.updateVendorBill(session, selectedVendorBill.id, input)
-              : await api.createVendorBill(session, input);
-            if (!file) return saved;
-            try {
-              return await api.uploadVendorDocument(session, user.companyId, saved.id, file);
-            } catch (reason) {
-              if (!selectedVendorBill) await api.removeVendorBill(session, saved);
-              throw reason;
-            }
-          }, setSelectedVendorBill)}
-        />
+        <EditorSurface inline visible={page === "Costs"}>
+          <VendorBillDialog
+            initial={selectedVendorBill}
+            data={masters}
+            jobs={jobs}
+            invoices={invoices}
+            bills={vendorBills}
+            close={() => setDialog(null)}
+            save={(input, file) => void confirmAction({ title: "Save vendor invoice changes?", message: "The expense, links and uploaded document will be updated.", confirmLabel: "Save changes" }, async () => {
+              const saved = selectedVendorBill
+                ? await api.updateVendorBill(session, selectedVendorBill.id, input)
+                : await api.createVendorBill(session, input);
+              if (!file) return saved;
+              try {
+                return await api.uploadVendorDocument(session, user.companyId, saved.id, file);
+              } catch (reason) {
+                if (!selectedVendorBill) await api.removeVendorBill(session, saved);
+                throw reason;
+              }
+            }, setSelectedVendorBill)}
+          />
+        </EditorSurface>
       )}
       {confirmation && (
         <ConfirmationDialog
@@ -1263,6 +1304,7 @@ function Invoices({
             <Detail label="Bill to" value={selected.customerName} />
             <Detail label="Customer TRN" value={selected.customerTrn || "—"} />
             <Detail label="Customer VAT" value={selected.customerVatNumber || "—"} />
+            <Detail label="Billing address" value={selected.customerAddress || "—"} />
             <Detail
               label="Route"
               value={[
@@ -2584,11 +2626,13 @@ function InvoiceDialog({
 
 function InvoiceEditDialog({
   invoice,
+  customers,
   taxes,
   close,
   save,
 }: {
   invoice: Invoice;
+  customers: Customer[];
   taxes: MasterData["taxRates"];
   close(): void;
   save(value: UpdateInvoice): void;
@@ -2608,6 +2652,29 @@ function InvoiceEditDialog({
         )?.id || taxes[0]?.id || "",
     })),
   );
+  const matchingCustomer = customers.find(
+    (customer) =>
+      customer.name === invoice.customerName &&
+      (customer.trn || null) === (invoice.customerTrn || null),
+  );
+  const [customerId, setCustomerId] = useState(matchingCustomer?.id || "");
+  const [customerName, setCustomerName] = useState(invoice.customerName);
+  const [customerTrn, setCustomerTrn] = useState(invoice.customerTrn || "");
+  const [customerVatNumber, setCustomerVatNumber] = useState(
+    invoice.customerVatNumber || "",
+  );
+  const [customerAddress, setCustomerAddress] = useState(
+    invoice.customerAddress || "",
+  );
+  const selectCustomer = (id: string) => {
+    setCustomerId(id);
+    const customer = customers.find((item) => item.id === id);
+    if (!customer) return;
+    setCustomerName(customer.name);
+    setCustomerTrn(customer.trn || "");
+    setCustomerVatNumber(customer.vatNumber || "");
+    setCustomerAddress(customer.billingAddress || "");
+  };
   const updateLine = (
     index: number,
     field: keyof (typeof lines)[number],
@@ -2639,10 +2706,10 @@ function InvoiceEditDialog({
           save({
             invoiceDate: String(data.get("invoiceDate")),
             dueDate: nullable(data, "dueDate"),
-            customerName: String(data.get("customerName")),
-            customerTrn: nullable(data, "customerTrn"),
-            customerVatNumber: nullable(data, "customerVatNumber"),
-            customerAddress: nullable(data, "customerAddress"),
+            customerName,
+            customerTrn: customerTrn.trim() || null,
+            customerVatNumber: customerVatNumber.trim() || null,
+            customerAddress: customerAddress.trim() || null,
             remarks: nullable(data, "remarks"),
             lines,
           });
@@ -2664,19 +2731,39 @@ function InvoiceEditDialog({
             <input name="dueDate" type="date" defaultValue={invoice.dueDate || ""} />
           </Field>
         </div>
+        <Field label="Select billing customer">
+          <select value={customerId} onChange={(event) => selectCustomer(event.target.value)}>
+            <option value="">Use custom invoice details</option>
+            {customers
+              .filter((customer) => customer.active || customer.id === customerId)
+              .map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name} · {customer.code}
+                </option>
+              ))}
+          </select>
+          <small className="input-help">
+            Selecting a customer fills its name, tax details and billing address. You can still revise the copied details below.
+          </small>
+        </Field>
         <Field label="Bill to">
-          <input name="customerName" required defaultValue={invoice.customerName} />
+          <input
+            name="customerName"
+            required
+            value={customerName}
+            onChange={(event) => setCustomerName(event.target.value)}
+          />
         </Field>
         <div className="two">
           <Field label="TRN number">
-            <input name="customerTrn" maxLength={32} defaultValue={invoice.customerTrn || ""} />
+            <input name="customerTrn" maxLength={32} value={customerTrn} onChange={(event) => setCustomerTrn(event.target.value)} />
           </Field>
           <Field label="VAT number">
-            <input name="customerVatNumber" maxLength={32} defaultValue={invoice.customerVatNumber || ""} />
+            <input name="customerVatNumber" maxLength={32} value={customerVatNumber} onChange={(event) => setCustomerVatNumber(event.target.value)} />
           </Field>
         </div>
         <Field label="Billing address">
-          <textarea name="customerAddress" rows={2} defaultValue={invoice.customerAddress || ""} />
+          <textarea name="customerAddress" rows={3} value={customerAddress} onChange={(event) => setCustomerAddress(event.target.value)} />
         </Field>
         <div className="invoice-edit-lines">
           <h3>Invoice charges</h3>
@@ -3383,6 +3470,26 @@ function Detail({ label: heading, value }: { label: string; value: string }) {
     </div>
   );
 }
+function EditorSurface({
+  inline,
+  visible,
+  children,
+}: {
+  inline: boolean;
+  visible: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={inline ? "editor-host" : "dialog-host"}
+      hidden={inline && !visible}
+    >
+      <InlineEditorContext.Provider value={inline}>
+        {children}
+      </InlineEditorContext.Provider>
+    </div>
+  );
+}
 function Modal({
   title,
   wide,
@@ -3394,12 +3501,13 @@ function Modal({
   close(): void;
   children: React.ReactNode;
 }) {
+  const inline = useContext(InlineEditorContext);
   return (
-    <div className="overlay">
+    <div className={inline ? "page-form" : "overlay"}>
       <section
         className={`modal ${wide ? "wide-modal" : ""}`}
-        role="dialog"
-        aria-modal="true"
+        role={inline ? undefined : "dialog"}
+        aria-modal={inline ? undefined : true}
       >
         <div className="panel-head">
           <div>

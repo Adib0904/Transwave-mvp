@@ -63,3 +63,29 @@
 @media(max-width:900px){.invoice-line-fields{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:520px){.invoice-line-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.confirmation-modal{padding:22px 18px!important}.confirmation-actions{grid-template-columns:1fr}.confirmation-actions .soft{order:2}}
+
+textarea{display:block;width:100%;margin-top:7px;padding:10px;border:1px solid #cbd8e5;border-radius:6px;background:#fff;color:var(--ink);font:inherit;resize:vertical}
+textarea:focus{outline:3px solid rgba(23,139,166,.25);outline-offset:2px;border-color:var(--blue)}
+
+/* Full-page edit forms remain mounted when users visit another section, so
+   entered values are still present when they return. */
+.editor-host{flex:1;min-width:0;height:100vh;overflow:auto;background:var(--bg)}
+.editor-host[hidden]{display:none}
+.editor-host>.page-form{display:block;min-height:100%;padding:36px 48px;background:transparent}
+.editor-host .modal{display:block;width:100%;max-width:1180px;max-height:none;margin:0;padding:0;overflow:visible;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px rgba(30,58,76,.06)}
+.editor-host .wide-modal{max-width:none}
+.editor-host .modal>.panel-head{position:static}
+.editor-host .modal>form{padding-bottom:1px}
+.editor-host .modal .form-actions{position:sticky;bottom:0}
+
+/* Desktop list/detail pages use two independent scroll regions. */
+@media(min-width:1001px){
+  .job-layout,.invoice-layout,.cost-layout{height:calc(100dvh - 150px);min-height:520px;overflow:hidden;align-items:stretch}
+  .job-layout>.panel,.invoice-layout>.panel,.cost-layout>.panel{height:100%;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+}
+
+@media(max-width:760px){
+  .editor-host{height:calc(100vh - 68px)}
+  .editor-host>.page-form{padding:20px 14px 24px}
+  .editor-host .modal .form-actions{bottom:0}
+}
