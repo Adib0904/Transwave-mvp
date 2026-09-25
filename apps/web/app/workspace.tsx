@@ -1277,6 +1277,17 @@ function Invoices({
               label="Equipment"
               value={`${selected.plannedContainerCount} × ${selected.plannedContainerType}`}
             />
+            <Detail
+              label="BL number"
+              value={
+                [
+                  selected.hbl ? `HBL: ${selected.hbl}` : null,
+                  selected.mbl ? `MBL: ${selected.mbl}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "—"
+              }
+            />
           </div>
           <table className="charge-table">
             <thead>
