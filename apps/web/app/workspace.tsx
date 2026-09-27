@@ -179,7 +179,7 @@ export function Workspace() {
         ? "Invoices"
         : dialog === "vendorBill" || (dialog === "vendor" && Boolean(editingVendor))
           ? "Costs"
-          : dialog === "customer" && editingCustomer
+          : dialog === "customer"
             ? "Customers"
             : (dialog === "port" && editingPort) ||
                 (dialog === "service" && editingService) ||
@@ -249,6 +249,12 @@ export function Workspace() {
   }
   async function openInvoice(id: string) {
     if (!session) return;
+    const cached = invoices.find((invoice) => invoice.id === id);
+    if (cached) {
+      setSelectedInvoice(cached);
+      goTo("Invoices");
+      return;
+    }
     setBusy(true);
     try {
       setSelectedInvoice(await api.invoice(session, id));
@@ -662,7 +668,7 @@ export function Workspace() {
         )}
       </section>
       {dialog === "customer" && (
-        <EditorSurface inline={editorPage === "Customers"} visible={page === "Customers"}>
+        <EditorSurface inline visible={page === "Customers"}>
           <CustomerDialog
             initial={editingCustomer}
             currencies={masters.currencies}
@@ -1285,7 +1291,7 @@ function Invoices({
             >
               <b>{i.invoiceNumber || i.draftReference}</b>
               <span>{i.customerName}</span>
-              <Tag text={i.status} />
+              <Tag text={i.paymentStatus === "PAID" ? "PAID" : i.status} />
               <strong>{money.format(Number(i.total))}</strong>
             </button>
           ))}
@@ -1298,13 +1304,21 @@ function Invoices({
               <h2>{selected.invoiceNumber || selected.draftReference}</h2>
               <p>Job {selected.jobNumber}</p>
             </div>
-            <Tag text={selected.status} />
+            <div className="status-tags">
+              <Tag text={selected.status} />
+              <Tag text={selected.paymentStatus} />
+            </div>
           </div>
           <div className="detail-grid">
             <Detail label="Bill to" value={selected.customerName} />
             <Detail label="Customer TRN" value={selected.customerTrn || "—"} />
             <Detail label="Customer VAT" value={selected.customerVatNumber || "—"} />
             <Detail label="Billing address" value={selected.customerAddress || "—"} />
+            <Detail label="Payment status" value={selected.paymentStatus} />
+            <Detail
+              label="Payment date"
+              value={selected.paymentDate ? printDate(selected.paymentDate) : "—"}
+            />
             <Detail
               label="Route"
               value={[
@@ -2666,6 +2680,8 @@ function InvoiceEditDialog({
   const [customerAddress, setCustomerAddress] = useState(
     invoice.customerAddress || "",
   );
+  const [paymentStatus, setPaymentStatus] = useState(invoice.paymentStatus);
+  const [paymentDate, setPaymentDate] = useState(invoice.paymentDate || "");
   const selectCustomer = (id: string) => {
     setCustomerId(id);
     const customer = customers.find((item) => item.id === id);
@@ -2706,6 +2722,7 @@ function InvoiceEditDialog({
           save({
             invoiceDate: String(data.get("invoiceDate")),
             dueDate: nullable(data, "dueDate"),
+            paymentDate: paymentStatus === "PAID" ? paymentDate : null,
             customerName,
             customerTrn: customerTrn.trim() || null,
             customerVatNumber: customerVatNumber.trim() || null,
@@ -2718,7 +2735,7 @@ function InvoiceEditDialog({
         <p className="form-help">
           The invoice number and {invoice.status.toLowerCase()} status remain unchanged. Every revision is audit logged.
         </p>
-        <div className="two">
+        <div className="three">
           <Field label="Invoice date">
             <input
               name="invoiceDate"
@@ -2730,7 +2747,35 @@ function InvoiceEditDialog({
           <Field label="Due date">
             <input name="dueDate" type="date" defaultValue={invoice.dueDate || ""} />
           </Field>
+          <Field label="Payment status">
+            <select
+              value={paymentStatus}
+              disabled={invoice.status !== "ISSUED"}
+              onChange={(event) => {
+                const status = event.target.value as Invoice["paymentStatus"];
+                setPaymentStatus(status);
+                setPaymentDate(
+                  status === "PAID"
+                    ? paymentDate || new Date().toISOString().slice(0, 10)
+                    : "",
+                );
+              }}
+            >
+              <option value="UNPAID">UNPAID</option>
+              <option value="PAID">PAID</option>
+            </select>
+          </Field>
         </div>
+        {paymentStatus === "PAID" && (
+          <Field label="Payment date">
+            <input
+              type="date"
+              required
+              value={paymentDate}
+              onChange={(event) => setPaymentDate(event.target.value)}
+            />
+          </Field>
+        )}
         <Field label="Select billing customer">
           <select value={customerId} onChange={(event) => selectCustomer(event.target.value)}>
             <option value="">Use custom invoice details</option>
@@ -3455,7 +3500,7 @@ function Metric({
   );
 }
 function Tag({ text }: { text: string }) {
-  const tone = ["ACTIVE", "ISSUED", "COMPLETED"].includes(text)
+  const tone = ["ACTIVE", "ISSUED", "COMPLETED", "PAID"].includes(text)
     ? "green"
     : text.includes("DRAFT") || text.includes("READY")
       ? "amber"

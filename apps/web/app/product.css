@@ -66,6 +66,7 @@
 
 textarea{display:block;width:100%;margin-top:7px;padding:10px;border:1px solid #cbd8e5;border-radius:6px;background:#fff;color:var(--ink);font:inherit;resize:vertical}
 textarea:focus{outline:3px solid rgba(23,139,166,.25);outline-offset:2px;border-color:var(--blue)}
+.status-tags{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
 
 /* Full-page edit forms remain mounted when users visit another section, so
    entered values are still present when they return. */

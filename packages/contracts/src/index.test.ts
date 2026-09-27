@@ -129,6 +129,7 @@ test("allows invoice revisions without customer TRN or VAT number", () => {
   if (result.success) {
     assert.equal(result.data.customerTrn, null);
     assert.equal(result.data.customerVatNumber, null);
+    assert.equal(result.data.paymentDate, null);
   }
 });
 

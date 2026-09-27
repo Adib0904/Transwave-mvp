@@ -23,6 +23,7 @@ export const jobStatusSchema = z.enum([
   "CANCELLED",
 ]);
 export const invoiceStatusSchema = z.enum(["DRAFT", "ISSUED", "VOID"]);
+export const invoicePaymentStatusSchema = z.enum(["UNPAID", "PAID"]);
 export const roleSchema = z.enum([
   "OWNER",
   "ADMIN",
@@ -486,6 +487,8 @@ export const invoiceSchema = z.object({
   issuedAt: z.string().datetime().nullable(),
   invoiceDate: z.string().nullable(),
   dueDate: z.string().nullable(),
+  paymentStatus: invoicePaymentStatusSchema,
+  paymentDate: z.string().nullable(),
   companyName: z.string(),
   companyTrn: z.string().nullable(),
   companyAddress: z.string().nullable(),
@@ -556,6 +559,7 @@ export const updateInvoiceLineSchema = z
 export const updateInvoiceSchema = z.object({
   invoiceDate: z.iso.date(),
   dueDate: z.union([z.iso.date(), z.literal(""), z.null()]).transform((value) => value || null),
+  paymentDate: z.union([z.iso.date(), z.literal(""), z.null()]).transform((value) => value || null).default(null),
   customerName: z.string().trim().min(1).max(200),
   customerTrn: z.union([z.string().trim().max(32), z.null()]).transform((value) => value || null).default(null),
   customerVatNumber: z.union([z.string().trim().max(32), z.null()]).transform((value) => value || null).default(null),

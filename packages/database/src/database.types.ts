@@ -512,6 +512,7 @@ export type Database = {
           notify_name_snapshot: string | null
           origin_port_snapshot: string | null
           package_count_snapshot: number | null
+          payment_date: string | null
           payment_terms_days_snapshot: number
           remarks: string | null
           place_of_delivery_snapshot: string | null
@@ -570,6 +571,7 @@ export type Database = {
           notify_name_snapshot?: string | null
           origin_port_snapshot?: string | null
           package_count_snapshot?: number | null
+          payment_date?: string | null
           payment_terms_days_snapshot: number
           remarks?: string | null
           place_of_delivery_snapshot?: string | null
@@ -628,6 +630,7 @@ export type Database = {
           notify_name_snapshot?: string | null
           origin_port_snapshot?: string | null
           package_count_snapshot?: number | null
+          payment_date?: string | null
           payment_terms_days_snapshot?: number
           remarks?: string | null
           place_of_delivery_snapshot?: string | null
@@ -1442,6 +1445,7 @@ export type Database = {
           p_invoice_date: string
           p_invoice_id: string
           p_lines: Json
+          p_payment_date: string | null
           p_remarks: string | null
         }
         Returns: string
