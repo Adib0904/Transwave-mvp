@@ -67,6 +67,8 @@
 textarea{display:block;width:100%;margin-top:7px;padding:10px;border:1px solid #cbd8e5;border-radius:6px;background:#fff;color:var(--ink);font:inherit;resize:vertical}
 textarea:focus{outline:3px solid rgba(23,139,166,.25);outline-offset:2px;border-color:var(--blue)}
 .status-tags{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.invoice-filters{display:grid;gap:10px;margin-bottom:16px;padding:13px;border:1px solid var(--line);border-radius:10px;background:#f8fbfc}.invoice-filter-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.invoice-filter-heading b{font-size:12px}.invoice-filter-heading button{border:0;background:none;color:#126f86;font:inherit;font-size:10px;font-weight:800;cursor:pointer}.invoice-filter-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.invoice-filter-grid label{min-width:0;margin:0}.invoice-filter-grid label span{display:block;margin-bottom:5px;color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.4px;text-transform:uppercase}.invoice-filter-grid input,.invoice-filter-grid select{width:100%;min-width:0;margin:0;padding:8px;font-size:11px}.invoice-filter-grid .filter-wide{grid-column:1/-1}
+@media(max-width:480px){.invoice-filter-grid{grid-template-columns:minmax(0,1fr)}.invoice-filter-grid .filter-wide{grid-column:auto}}
 
 /* Full-page edit forms remain mounted when users visit another section, so
    entered values are still present when they return. */

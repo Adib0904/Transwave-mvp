@@ -49,6 +49,12 @@ import {
   type ChargeCurrency,
 } from "./charge-money";
 import { shouldUppercaseApplicationInput } from "./text-input";
+import {
+  emptyInvoiceFilters,
+  filterInvoices,
+  hasInvoiceFilters,
+  type InvoiceFilters,
+} from "./invoice-filters";
 import "./invoice-flow.css";
 import "./job-editor.css";
 
@@ -1279,11 +1285,116 @@ function Invoices({
   onEdit(): void;
   onIssue(): void;
 }) {
+  const [filters, setFilters] = useState<InvoiceFilters>(emptyInvoiceFilters);
+  const filteredInvoices = filterInvoices(invoices, filters);
+  const customers = [...new Set(invoices.map((invoice) => invoice.customerName))].sort();
+  const loadingPorts = [...new Set(invoices.map((invoice) => invoice.polName))].sort();
+  const dischargePorts = [...new Set(invoices.map((invoice) => invoice.podName))].sort();
+  const updateFilter = <K extends keyof InvoiceFilters>(key: K, value: InvoiceFilters[K]) =>
+    setFilters((current) => ({ ...current, [key]: value }));
+
   return (
     <div className="invoice-layout">
-      <Panel title="Invoices" sub={`${invoices.length} persisted records`}>
+      <Panel
+        title="Invoices"
+        sub={`${filteredInvoices.length} of ${invoices.length} records`}
+      >
+        <div className="invoice-filters">
+          <div className="invoice-filter-heading">
+            <b>Filter invoices</b>
+            {hasInvoiceFilters(filters) && (
+              <button type="button" onClick={() => setFilters(emptyInvoiceFilters)}>
+                Clear all
+              </button>
+            )}
+          </div>
+          <div className="invoice-filter-grid">
+            <label>
+              <span>From date</span>
+              <input
+                type="date"
+                value={filters.dateFrom}
+                max={filters.dateTo || undefined}
+                onChange={(event) => updateFilter("dateFrom", event.target.value)}
+              />
+            </label>
+            <label>
+              <span>To date</span>
+              <input
+                type="date"
+                value={filters.dateTo}
+                min={filters.dateFrom || undefined}
+                onChange={(event) => updateFilter("dateTo", event.target.value)}
+              />
+            </label>
+            <label className="filter-wide">
+              <span>Customer</span>
+              <select
+                value={filters.customer}
+                onChange={(event) => updateFilter("customer", event.target.value)}
+              >
+                <option value="">All customers</option>
+                {customers.map((customer) => (
+                  <option key={customer} value={customer}>{customer}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Invoice number</span>
+              <input
+                value={filters.invoiceNumber}
+                onChange={(event) => updateFilter("invoiceNumber", event.target.value)}
+                placeholder="INV/TSW/..."
+              />
+            </label>
+            <label>
+              <span>B/L number</span>
+              <input
+                value={filters.blNumber}
+                onChange={(event) => updateFilter("blNumber", event.target.value)}
+                placeholder="HBL or MBL"
+              />
+            </label>
+            <label>
+              <span>Payment</span>
+              <select
+                value={filters.paymentStatus}
+                onChange={(event) => updateFilter("paymentStatus", event.target.value as InvoiceFilters["paymentStatus"])}
+              >
+                <option value="">Paid & unpaid</option>
+                <option value="PAID">Paid</option>
+                <option value="UNPAID">Unpaid</option>
+              </select>
+            </label>
+            <label>
+              <span>Invoice status</span>
+              <select
+                value={filters.invoiceStatus}
+                onChange={(event) => updateFilter("invoiceStatus", event.target.value as InvoiceFilters["invoiceStatus"])}
+              >
+                <option value="">Draft & issued</option>
+                <option value="DRAFT">Draft</option>
+                <option value="ISSUED">Issued</option>
+              </select>
+            </label>
+            <label>
+              <span>POL</span>
+              <select value={filters.pol} onChange={(event) => updateFilter("pol", event.target.value)}>
+                <option value="">All loading ports</option>
+                {loadingPorts.map((port) => <option key={port} value={port}>{port}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>POD</span>
+              <select value={filters.pod} onChange={(event) => updateFilter("pod", event.target.value)}>
+                <option value="">All discharge ports</option>
+                {dischargePorts.map((port) => <option key={port} value={port}>{port}</option>)}
+              </select>
+            </label>
+          </div>
+        </div>
         <div className="invoice-list">
-          {invoices.map((i) => (
+          {filteredInvoices.map((i) => (
             <button
               className={selected?.id === i.id ? "invoice selected" : "invoice"}
               key={i.id}
@@ -1295,6 +1406,9 @@ function Invoices({
               <strong>{money.format(Number(i.total))}</strong>
             </button>
           ))}
+          {!filteredInvoices.length && (
+            <p className="empty-inline">No invoices match these filters.</p>
+          )}
         </div>
       </Panel>
       {selected ? (
