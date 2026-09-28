@@ -2705,49 +2705,53 @@ function InvoiceDialog({
     .reduce((sum, c) => sum + Number(c.totalAmount), 0);
   return (
     <Modal title="Create draft invoice" close={close}>
-      <p className="muted">
-        Select the unbilled charges to snapshot into this draft.
-      </p>
-      <div className="review-lines">
-        {charges.map((c) => (
-          <label key={c.id}>
-            <input
-              type="checkbox"
-              checked={ids.includes(c.id)}
-              onChange={(event) =>
-                setIds((current) =>
-                  event.target.checked
-                    ? [...current, c.id]
-                    : current.filter((id) => id !== c.id),
-                )
-              }
-            />
-            <span>
-              {c.serviceName}
-              <small>
-                {c.quantity} {c.uom} × {money.format(Number(c.unitRate))}
-              </small>
-            </span>
-            <b>{money.format(Number(c.totalAmount))}</b>
-          </label>
-        ))}
-      </div>
-      <div className="dialog-total">
-        <span>Selected total</span>
-        <b>{money.format(total)}</b>
-      </div>
-      <div className="form-actions">
-        <button type="button" className="soft" onClick={close}>
-          Cancel
-        </button>
-        <button
-          className="button"
-          disabled={!ids.length}
-          onClick={() => save(ids)}
-        >
-          Create draft
-        </button>
-      </div>
+      <form
+        className="invoice-draft-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save(ids);
+        }}
+      >
+        <p className="muted">
+          Select the unbilled charges to snapshot into this draft.
+        </p>
+        <div className="review-lines">
+          {charges.map((c) => (
+            <label key={c.id}>
+              <input
+                type="checkbox"
+                checked={ids.includes(c.id)}
+                onChange={(event) =>
+                  setIds((current) =>
+                    event.target.checked
+                      ? [...current, c.id]
+                      : current.filter((id) => id !== c.id),
+                  )
+                }
+              />
+              <span>
+                {c.serviceName}
+                <small>
+                  {c.quantity} {c.uom} × {money.format(Number(c.unitRate))}
+                </small>
+              </span>
+              <b>{money.format(Number(c.totalAmount))}</b>
+            </label>
+          ))}
+        </div>
+        <div className="dialog-total">
+          <span>Selected total</span>
+          <b>{money.format(total)}</b>
+        </div>
+        <div className="form-actions">
+          <button type="button" className="soft" onClick={close}>
+            Cancel
+          </button>
+          <button type="submit" className="button" disabled={!ids.length}>
+            Create draft
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }

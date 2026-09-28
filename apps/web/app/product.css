@@ -49,6 +49,7 @@
 .modal>form>label:first-child,.modal>form>.auto-number:first-child{margin-top:18px}
 .modal .form-actions{position:sticky;z-index:4;bottom:0;margin:18px -24px 0;padding:14px 24px 18px;border-top:1px solid var(--line);background:#fff;box-shadow:0 -8px 20px rgba(16,42,67,.05)}
 .modal label,.modal input,.modal select,.modal textarea{min-width:0}
+.invoice-draft-form{overflow-x:hidden}.invoice-draft-form>.muted{margin:16px 0 14px;line-height:1.5}.invoice-draft-form .review-lines label{grid-template-columns:auto minmax(0,1fr) auto}.invoice-draft-form .review-lines span{min-width:0;font-weight:700;overflow-wrap:anywhere}.invoice-draft-form .review-lines b{white-space:nowrap}.invoice-draft-form .dialog-total{align-items:center;gap:16px}.invoice-draft-form .dialog-total b{white-space:nowrap}
 .confirmation-overlay{z-index:60}
 .confirmation-modal{width:min(430px,100%)!important;padding:26px!important;text-align:center;overflow:visible!important}
 .confirmation-icon{display:grid;place-items:center;width:48px;height:48px;margin:0 auto 16px;border-radius:50%;background:#e5f5f2;color:#087f5b;font-size:22px;font-weight:900}
@@ -63,6 +64,7 @@
 @media(max-width:900px){.invoice-line-fields{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:520px){.invoice-line-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.confirmation-modal{padding:22px 18px!important}.confirmation-actions{grid-template-columns:1fr}.confirmation-actions .soft{order:2}}
+@media(max-width:480px){.invoice-draft-form .review-lines label{grid-template-columns:auto minmax(0,1fr)}.invoice-draft-form .review-lines b{grid-column:2;justify-self:start}.invoice-draft-form .dialog-total{font-size:14px}.invoice-draft-form .form-actions>*{flex:1}}
 
 textarea{display:block;width:100%;margin-top:7px;padding:10px;border:1px solid #cbd8e5;border-radius:6px;background:#fff;color:var(--ink);font:inherit;resize:vertical}
 textarea:focus{outline:3px solid rgba(23,139,166,.25);outline-offset:2px;border-color:var(--blue)}
