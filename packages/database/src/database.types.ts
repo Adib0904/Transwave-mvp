@@ -1442,6 +1442,7 @@ export type Database = {
           p_customer_trn: string | null
           p_customer_vat_number: string | null
           p_due_date: string | null
+          p_details: Json
           p_invoice_date: string
           p_invoice_id: string
           p_lines: Json

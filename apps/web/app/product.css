@@ -58,11 +58,14 @@
 .confirmation-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.danger-button{background:#b42318}
 .status-explainer{margin:-3px 0 18px;padding:11px 13px;border-left:3px solid #d4a72c;border-radius:7px;background:#fff8e2;color:#76551a;font-size:12px;line-height:1.5}
 .invoice-edit-lines{display:grid;gap:12px;margin-top:18px}.invoice-edit-lines>h3{margin:0}.invoice-edit-line{display:grid;gap:10px;padding:15px;border:1px solid var(--line);border-radius:10px;background:#f8fbfc}.invoice-edit-line>label{margin:0}.invoice-line-fields{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px}.invoice-line-fields label{margin:0}.invoice-line-fields input,.invoice-line-fields select{margin-top:5px}
+.invoice-container-editor{min-width:0}.invoice-container-row{display:grid;grid-template-columns:minmax(180px,2fr) 80px minmax(100px,1fr) minmax(120px,1fr) auto;gap:9px;align-items:end;padding:10px 0;border-top:1px solid var(--line)}.invoice-container-row label{margin:0}.invoice-container-row .danger-link{margin-bottom:10px}
 
 @media(max-width:1000px) and (min-width:761px){.profile-trigger{grid-template-columns:38px;padding:7px}.profile-trigger span,.profile-trigger em{display:none}.profile-menu{position:fixed;left:82px;bottom:18px}.profile-menu::after{left:-6px;bottom:18px;border:0;border-left:1px solid #d6e5ea;border-bottom:1px solid #d6e5ea}}
 @media(max-width:760px){.side{position:fixed;inset:auto 0 0;height:68px;overflow-x:auto}.workspace{max-width:none;margin:0}.overlay{padding:8px}.overlay>.modal{max-height:calc(100dvh - 16px)}.modal>.panel-head{padding:18px 18px 14px}.modal>form{padding-inline:18px}.modal .form-actions{margin-inline:-18px;padding-inline:18px}.profile-area{display:none}}
 @media(max-width:900px){.invoice-line-fields{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:900px){.invoice-container-row{grid-template-columns:repeat(2,minmax(0,1fr));padding:14px;border:1px solid var(--line);border-radius:9px;margin-bottom:9px}.invoice-container-row .danger-link{justify-self:start;margin:0}}
 @media(max-width:520px){.invoice-line-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.invoice-container-row{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:480px){.confirmation-modal{padding:22px 18px!important}.confirmation-actions{grid-template-columns:1fr}.confirmation-actions .soft{order:2}}
 @media(max-width:480px){.invoice-draft-form .review-lines label{grid-template-columns:auto minmax(0,1fr)}.invoice-draft-form .review-lines b{grid-column:2;justify-self:start}.invoice-draft-form .dialog-total{font-size:14px}.invoice-draft-form .form-actions>*{flex:1}}
 

@@ -111,6 +111,32 @@ test("allows invoice revisions without customer TRN or VAT number", () => {
     customerTrn: "",
     customerVatNumber: null,
     customerAddress: null,
+    transportMode: "SEA",
+    polName: "SOHAR",
+    podName: "NHAVA SHEVA",
+    transshipmentPortName: null,
+    vessel: "VESSEL ONE",
+    voyage: "V001",
+    sailedDate: null,
+    originPort: "SOHAR",
+    placeOfDelivery: "NHAVA SHEVA",
+    shipper: null,
+    consignee: null,
+    notifyName: null,
+    commodity: "SULPHUR",
+    salesPerson: null,
+    customerReference: null,
+    packageCount: null,
+    weightKg: null,
+    volumeCbm: null,
+    chargeableWeightKg: null,
+    customsDocReference: null,
+    shipmentTerms: "PREPAID",
+    hbl: null,
+    mbl: "MBL-001",
+    plannedContainerType: "20GP",
+    plannedContainerCount: 1,
+    containers: [],
     remarks: null,
     lines: [
       {
@@ -130,7 +156,26 @@ test("allows invoice revisions without customer TRN or VAT number", () => {
     assert.equal(result.data.customerTrn, null);
     assert.equal(result.data.customerVatNumber, null);
     assert.equal(result.data.paymentDate, null);
+    assert.equal(result.data.commodity, "SULPHUR");
+    assert.equal(result.data.plannedContainerType, "20GP");
   }
+});
+
+test("rejects duplicate invoice container numbers", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const base = {
+    invoiceDate: "2026-10-02",
+    dueDate: null,
+    customerName: "CUSTOMER LLC",
+    transportMode: "SEA",
+    polName: "SOHAR",
+    podName: "NHAVA SHEVA",
+    plannedContainerType: "20GP",
+    plannedContainerCount: 2,
+    lines: [{ id, description: "FREIGHT", quantity: "1", uom: "CNT", currency: "AED", exchangeRate: "1", unitRate: "100.00", taxRateId: id }],
+  } as const;
+  const container = { id, containerNumber: "MSCU1234567", size: "20", containerType: "GP", sealNumber: null } as const;
+  assert.equal(updateInvoiceSchema.safeParse({ ...base, containers: [container, { ...container, id: "22222222-2222-4222-8222-222222222222" }] }).success, false);
 });
 
 test("allows customers without tax IDs and defaults new master records to USD", () => {

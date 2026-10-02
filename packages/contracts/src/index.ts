@@ -564,8 +564,50 @@ export const updateInvoiceSchema = z.object({
   customerTrn: z.union([z.string().trim().max(32), z.null()]).transform((value) => value || null).default(null),
   customerVatNumber: z.union([z.string().trim().max(32), z.null()]).transform((value) => value || null).default(null),
   customerAddress: z.string().trim().max(500).nullable().default(null),
+  transportMode: transportModeSchema,
+  polName: z.string().trim().min(1).max(160),
+  podName: z.string().trim().min(1).max(160),
+  transshipmentPortName: z.string().trim().max(160).nullable().default(null),
+  vessel: z.string().trim().max(160).nullable().default(null),
+  voyage: z.string().trim().max(80).nullable().default(null),
+  sailedDate: z.union([z.iso.date(), z.literal(""), z.null()]).transform((value) => value || null).default(null),
+  originPort: z.string().trim().max(160).nullable().default(null),
+  placeOfDelivery: z.string().trim().max(200).nullable().default(null),
+  shipper: z.string().trim().max(200).nullable().default(null),
+  consignee: z.string().trim().max(200).nullable().default(null),
+  notifyName: z.string().trim().max(200).nullable().default(null),
+  commodity: z.string().trim().max(300).nullable().default(null),
+  salesPerson: z.string().trim().max(160).nullable().default(null),
+  customerReference: z.string().trim().max(120).nullable().default(null),
+  packageCount: z.number().int().nonnegative().max(1_000_000).nullable().default(null),
+  weightKg: z.number().nonnegative().max(1_000_000_000).nullable().default(null),
+  volumeCbm: z.number().nonnegative().max(1_000_000_000).nullable().default(null),
+  chargeableWeightKg: z.number().nonnegative().max(1_000_000_000).nullable().default(null),
+  customsDocReference: z.string().trim().max(160).nullable().default(null),
+  shipmentTerms: z.string().trim().max(80).nullable().default(null),
+  hbl: z.string().trim().max(100).nullable().default(null),
+  mbl: z.string().trim().max(100).nullable().default(null),
+  plannedContainerType: z.string().trim().min(1).max(24),
+  plannedContainerCount: z.number().int().positive().max(999),
+  containers: z.array(containerSchema).max(999),
   remarks: z.string().trim().max(1500).nullable().default(null),
   lines: z.array(updateInvoiceLineSchema).min(1).max(100),
+}).superRefine((value, context) => {
+  if (value.containers.length > value.plannedContainerCount) {
+    context.addIssue({
+      code: "custom",
+      path: ["containers"],
+      message: "Container numbers cannot exceed the planned container count",
+    });
+  }
+  const numbers = value.containers.map((container) => container.containerNumber);
+  if (new Set(numbers).size !== numbers.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["containers"],
+      message: "Container numbers must be unique",
+    });
+  }
 });
 
 export const vendorBillStatusSchema = z.enum(["DRAFT", "APPROVED", "PAID"]);

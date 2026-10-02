@@ -2800,6 +2800,7 @@ function InvoiceEditDialog({
   );
   const [paymentStatus, setPaymentStatus] = useState(invoice.paymentStatus);
   const [paymentDate, setPaymentDate] = useState(invoice.paymentDate || "");
+  const [containers, setContainers] = useState(invoice.containers);
   const selectCustomer = (id: string) => {
     setCustomerId(id);
     const customer = customers.find((item) => item.id === id);
@@ -2827,6 +2828,16 @@ function InvoiceEditDialog({
           : line,
       ),
     );
+  const updateContainer = <K extends keyof Invoice["containers"][number]>(
+    index: number,
+    field: K,
+    value: Invoice["containers"][number][K],
+  ) =>
+    setContainers((current) =>
+      current.map((container, containerIndex) =>
+        containerIndex === index ? { ...container, [field]: value } : container,
+      ),
+    );
   return (
     <Modal
       title={`Edit ${invoice.invoiceNumber || invoice.draftReference}`}
@@ -2837,6 +2848,8 @@ function InvoiceEditDialog({
         onSubmit={(event) => {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
+          const weightMt = nullableNumber(data, "weightMt");
+          const chargeableWeightMt = nullableNumber(data, "chargeableWeightMt");
           save({
             invoiceDate: String(data.get("invoiceDate")),
             dueDate: nullable(data, "dueDate"),
@@ -2845,6 +2858,33 @@ function InvoiceEditDialog({
             customerTrn: customerTrn.trim() || null,
             customerVatNumber: customerVatNumber.trim() || null,
             customerAddress: customerAddress.trim() || null,
+            transportMode: String(data.get("transportMode")) as Invoice["transportMode"],
+            polName: String(data.get("polName")),
+            podName: String(data.get("podName")),
+            transshipmentPortName: nullable(data, "transshipmentPortName"),
+            vessel: nullable(data, "vessel"),
+            voyage: nullable(data, "voyage"),
+            sailedDate: nullable(data, "sailedDate"),
+            originPort: nullable(data, "originPort"),
+            placeOfDelivery: nullable(data, "placeOfDelivery"),
+            shipper: nullable(data, "shipper"),
+            consignee: nullable(data, "consignee"),
+            notifyName: nullable(data, "notifyName"),
+            commodity: nullable(data, "commodity"),
+            salesPerson: nullable(data, "salesPerson"),
+            customerReference: nullable(data, "customerReference"),
+            packageCount: nullableNumber(data, "packageCount"),
+            weightKg: weightMt === null ? null : weightMt * 1000,
+            volumeCbm: nullableNumber(data, "volumeCbm"),
+            chargeableWeightKg:
+              chargeableWeightMt === null ? null : chargeableWeightMt * 1000,
+            customsDocReference: nullable(data, "customsDocReference"),
+            shipmentTerms: nullable(data, "shipmentTerms"),
+            hbl: nullable(data, "hbl"),
+            mbl: nullable(data, "mbl"),
+            plannedContainerType: String(data.get("plannedContainerType")),
+            plannedContainerCount: Number(data.get("plannedContainerCount")),
+            containers,
             remarks: nullable(data, "remarks"),
             lines,
           });
@@ -2928,6 +2968,79 @@ function InvoiceEditDialog({
         <Field label="Billing address">
           <textarea name="customerAddress" rows={3} value={customerAddress} onChange={(event) => setCustomerAddress(event.target.value)} />
         </Field>
+        <FormSection title="Shipment details" note="These values appear on this invoice only">
+          <div className="three">
+            <Field label="Transport mode">
+              <select name="transportMode" defaultValue={invoice.transportMode}>
+                <option>SEA</option><option>AIR</option><option>ROAD</option><option>MULTIMODAL</option>
+              </select>
+            </Field>
+            <Field label="Vessel"><input name="vessel" maxLength={160} defaultValue={invoice.vessel || ""} /></Field>
+            <Field label="Voyage"><input name="voyage" maxLength={80} defaultValue={invoice.voyage || ""} /></Field>
+          </div>
+          <div className="three">
+            <Field label="Port of loading (POL)"><input name="polName" required maxLength={160} defaultValue={invoice.polName} /></Field>
+            <Field label="Transshipment port"><input name="transshipmentPortName" maxLength={160} defaultValue={invoice.transshipmentPortName || ""} /></Field>
+            <Field label="Port of discharge (POD)"><input name="podName" required maxLength={160} defaultValue={invoice.podName} /></Field>
+          </div>
+          <div className="three">
+            <Field label="Sailed date"><input name="sailedDate" type="date" defaultValue={invoice.sailedDate || ""} /></Field>
+            <Field label="Origin port"><input name="originPort" maxLength={160} defaultValue={invoice.originPort || ""} /></Field>
+            <Field label="Place of delivery"><input name="placeOfDelivery" maxLength={200} defaultValue={invoice.placeOfDelivery || ""} /></Field>
+          </div>
+          <div className="three">
+            <Field label="Shipper"><input name="shipper" maxLength={200} defaultValue={invoice.shipper || ""} /></Field>
+            <Field label="Consignee"><input name="consignee" maxLength={200} defaultValue={invoice.consignee || ""} /></Field>
+            <Field label="Notify name"><input name="notifyName" maxLength={200} defaultValue={invoice.notifyName || ""} /></Field>
+          </div>
+          <div className="three">
+            <Field label="Commodity"><input name="commodity" maxLength={300} defaultValue={invoice.commodity || ""} /></Field>
+            <Field label="Sales person"><input name="salesPerson" maxLength={160} defaultValue={invoice.salesPerson || ""} /></Field>
+            <Field label="Customer reference"><input name="customerReference" maxLength={120} defaultValue={invoice.customerReference || ""} /></Field>
+          </div>
+          <div className="three">
+            <Field label="HBL"><input name="hbl" maxLength={100} defaultValue={invoice.hbl || ""} /></Field>
+            <Field label="MBL"><input name="mbl" maxLength={100} defaultValue={invoice.mbl || ""} /></Field>
+            <Field label="Customs document reference"><input name="customsDocReference" maxLength={160} defaultValue={invoice.customsDocReference || ""} /></Field>
+          </div>
+        </FormSection>
+        <FormSection title="Cargo and equipment" note="Weights are entered and printed in metric tonnes">
+          <div className="three">
+            <Field label="Package type / equipment"><input name="plannedContainerType" required maxLength={24} defaultValue={invoice.plannedContainerType} /></Field>
+            <Field label="No. of packages"><input name="packageCount" type="number" min="0" step="1" defaultValue={invoice.packageCount ?? ""} /></Field>
+            <Field label="Terms of shipment"><input name="shipmentTerms" maxLength={80} defaultValue={invoice.shipmentTerms || ""} /></Field>
+          </div>
+          <div className="three">
+            <Field label="Weight (MT)"><input name="weightMt" type="number" min="0" step="0.001" defaultValue={invoice.weightKg === null ? "" : invoice.weightKg / 1000} /></Field>
+            <Field label="Volume (CBM)"><input name="volumeCbm" type="number" min="0" step="0.001" defaultValue={invoice.volumeCbm ?? ""} /></Field>
+            <Field label="Chargeable weight (MT)"><input name="chargeableWeightMt" type="number" min="0" step="0.001" defaultValue={invoice.chargeableWeightKg === null ? "" : invoice.chargeableWeightKg / 1000} /></Field>
+          </div>
+          <Field label="Planned container count">
+            <input name="plannedContainerCount" required type="number" min={Math.max(1, containers.length)} max="999" step="1" defaultValue={invoice.plannedContainerCount} />
+          </Field>
+          <div className="invoice-container-editor">
+            <div className="section-heading">
+              <div><h3>Container list</h3><p>Edit the container number, size, type, or seal shown on this invoice.</p></div>
+              <button
+                type="button"
+                className="soft compact"
+                onClick={() => setContainers((current) => [...current, { id: crypto.randomUUID(), containerNumber: "", size: "20", containerType: "GP", sealNumber: null }])}
+              >
+                + Add container
+              </button>
+            </div>
+            {containers.map((container, index) => (
+              <div className="invoice-container-row" key={container.id}>
+                <Field label="Container number"><input required maxLength={64} value={container.containerNumber} onChange={(event) => updateContainer(index, "containerNumber", event.target.value.toUpperCase())} /></Field>
+                <Field label="Size"><select value={container.size} onChange={(event) => updateContainer(index, "size", event.target.value as "20" | "40" | "45")}><option>20</option><option>40</option><option>45</option></select></Field>
+                <Field label="Type"><input required maxLength={24} value={container.containerType} onChange={(event) => updateContainer(index, "containerType", event.target.value)} /></Field>
+                <Field label="Seal number"><input maxLength={64} value={container.sealNumber || ""} onChange={(event) => updateContainer(index, "sealNumber", event.target.value || null)} /></Field>
+                <button type="button" className="danger-link" onClick={() => setContainers((current) => current.filter((_, containerIndex) => containerIndex !== index))}>Remove</button>
+              </div>
+            ))}
+            {!containers.length && <p className="empty-inline">No containers are listed on this invoice.</p>}
+          </div>
+        </FormSection>
         <div className="invoice-edit-lines">
           <h3>Invoice charges</h3>
           {lines.map((line, index) => {
