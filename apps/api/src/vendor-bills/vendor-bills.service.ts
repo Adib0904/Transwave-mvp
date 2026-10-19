@@ -11,7 +11,16 @@ type LineRow = Database["public"]["Tables"]["vendor_bill_lines"]["Row"];
 @Injectable()
 export class VendorBillsService {
   async list(database: TransWaveDatabaseClient): Promise<VendorBill[]> {
-    const result = await database.from("vendor_bills").select("id").order("bill_date", { ascending: false });
+    const visibleJobs = await database.from("jobs").select("id");
+    if (visibleJobs.error) throwDatabaseError(visibleJobs.error);
+    const visibleJobIds = (visibleJobs.data ?? []).map((job) => job.id);
+    if (visibleJobIds.length === 0) return [];
+
+    const result = await database
+      .from("vendor_bills")
+      .select("id")
+      .in("job_id", visibleJobIds)
+      .order("bill_date", { ascending: false });
     if (result.error) throwDatabaseError(result.error);
     return Promise.all((result.data ?? []).map((bill) => this.findOne(database, bill.id)));
   }
@@ -24,7 +33,7 @@ export class VendorBillsService {
       database.from("vendors").select("id, vendor_code, legal_name, trn").eq("id", bill.vendor_id).single(),
       database.from("jobs").select("id, job_number").eq("id", bill.job_id).single(),
       bill.customer_invoice_id
-        ? database.from("invoices").select("id, invoice_number, draft_reference, subtotal_aed").eq("id", bill.customer_invoice_id).single()
+        ? database.from("invoices").select("id, invoice_number, draft_reference, subtotal_aed").eq("id", bill.customer_invoice_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
     ]);
     for (const result of [linesResult, vendorResult, jobResult, invoiceResult]) if (result.error) throwDatabaseError(result.error);

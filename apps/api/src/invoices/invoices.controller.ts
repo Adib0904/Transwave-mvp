@@ -16,7 +16,7 @@ export class InvoicesController {
   @Get()
   @ApiOperation({ summary: "List visible draft and issued invoices" })
   list(@Req() request: AuthenticatedRequest) {
-    return this.invoices.list(request.database);
+    return this.invoices.list(request.database, request.auth.userId);
   }
 
   @Get(":id")

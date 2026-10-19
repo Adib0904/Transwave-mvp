@@ -98,6 +98,16 @@ export class JobsService {
     );
   }
 
+  async remove(
+    database: TransWaveDatabaseClient,
+    userId: string,
+    id: string,
+  ): Promise<void> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS"]);
+    const { error } = await database.rpc("delete_job", { p_id: id });
+    if (error) throwDatabaseError(error);
+  }
+
   async addContainer(
     database: TransWaveDatabaseClient,
     userId: string,

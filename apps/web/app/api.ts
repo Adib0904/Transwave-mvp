@@ -73,6 +73,7 @@ export const api = {
   createJob: (s: Session, value: SaveJob) => call<JobDetail>(s, "/jobs", { method: "POST", body: JSON.stringify(value) }),
   createSimilarJob: (s: Session, id: string) => call<JobDetail>(s, `/jobs/${id}/similar`, { method: "POST" }),
   updateJob: (s: Session, id: string, value: SaveJob) => call<JobDetail>(s, `/jobs/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
+  removeJob: (s: Session, id: string) => call<void>(s, `/jobs/${id}`, { method: "DELETE" }),
   addContainer: (s: Session, id: string, value: SaveContainer) => call<JobDetail>(s, `/jobs/${id}/containers`, { method: "POST", body: JSON.stringify(value) }),
   removeContainer: (s: Session, id: string, containerId: string) => call<JobDetail>(s, `/jobs/${id}/containers/${containerId}`, { method: "DELETE" }),
   saveCharge: (s: Session, id: string, value: CreateCharge) => call<JobDetail>(s, `/jobs/${id}/charges`, { method: "POST", body: JSON.stringify(value) }),

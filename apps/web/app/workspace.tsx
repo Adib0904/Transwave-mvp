@@ -101,6 +101,10 @@ const icons: Record<NavigationPage, string> = {
 const label = (value: string) => value.replaceAll("_", " ");
 const vendorBillStatusLabel = (status: VendorBill["status"]) =>
   status === "DRAFT" ? "PENDING REVIEW" : label(status);
+const recordRoute = (pathname: string) => {
+  const [section, id] = pathname.split("/").filter(Boolean);
+  return id && id !== "new" ? { section, id } : null;
+};
 const route = (job: JobSummary | JobDetail) =>
   [job.polName, job.transshipmentPortName, job.podName]
     .filter(Boolean)
@@ -141,6 +145,7 @@ export function Workspace() {
   const pathname = usePathname();
   const { session, user, signOut } = useAuth();
   const page = pageFromPathname(pathname);
+  const record = recordRoute(pathname);
   const [masters, setMasters] = useState<MasterData | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -167,6 +172,7 @@ export function Workspace() {
   } | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
   const loadInFlight = useRef<Promise<void> | null>(null);
   const canManageOperations = ["OWNER", "ADMIN", "OPERATIONS"].includes(
     user?.role ?? "VIEWER",
@@ -236,6 +242,23 @@ export function Workspace() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(""), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!session || !record) return;
+    if (record.section === "jobs" && selectedJob?.id !== record.id) {
+      void api.job(session, record.id).then(setSelectedJob).catch((reason) => setError(message(reason)));
+    } else if (record.section === "invoices" && selectedInvoice?.id !== record.id) {
+      void api.invoice(session, record.id).then(setSelectedInvoice).catch((reason) => setError(message(reason)));
+    } else if (record.section === "costs" && selectedVendorBill?.id !== record.id) {
+      void api.vendorBill(session, record.id).then(setSelectedVendorBill).catch((reason) => setError(message(reason)));
+    }
+  }, [pathname, record?.id, record?.section, session, selectedJob?.id, selectedInvoice?.id, selectedVendorBill?.id]);
+
   const goTo = (next: Page) => {
     const destination = navigationPaths[next];
     if (pathname !== destination) router.push(destination);
@@ -246,7 +269,48 @@ export function Workspace() {
     setBusy(true);
     try {
       setSelectedJob(await api.job(session, id));
-      goTo("Jobs");
+      router.push(`/jobs/${encodeURIComponent(id)}`);
+    } catch (reason) {
+      setError(message(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteJob(job: JobDetail) {
+    if (!session) return;
+    const deletedIndex = jobs.findIndex((item) => item.id === job.id);
+    setBusy(true);
+    setError("");
+    setToast("");
+    try {
+      let remainingJobs: JobSummary[] | undefined;
+      try {
+        await api.removeJob(session, job.id);
+      } catch (reason) {
+        if (message(reason) !== "Job not found") throw reason;
+        remainingJobs = await api.jobs(session);
+        if (remainingJobs.some((item) => item.id === job.id)) throw reason;
+      }
+      setToast(`${job.jobNumber} deleted successfully`);
+      if (remainingJobs === undefined) {
+        try {
+          remainingJobs = await api.jobs(session);
+        } catch {
+          remainingJobs = jobs.filter((item) => item.id !== job.id);
+        }
+      }
+      const availableJobs = remainingJobs ?? [];
+      setJobs(availableJobs);
+      const nextIndex = Math.min(Math.max(deletedIndex, 0), availableJobs.length - 1);
+      const nextJob = availableJobs[nextIndex];
+      if (nextJob) {
+        setSelectedJob(await api.job(session, nextJob.id));
+        router.push(`/jobs/${encodeURIComponent(nextJob.id)}`);
+      } else {
+        setSelectedJob(null);
+        router.push("/jobs");
+      }
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -258,13 +322,13 @@ export function Workspace() {
     const cached = invoices.find((invoice) => invoice.id === id);
     if (cached) {
       setSelectedInvoice(cached);
-      goTo("Invoices");
+      router.push(`/invoices/${encodeURIComponent(id)}`);
       return;
     }
     setBusy(true);
     try {
       setSelectedInvoice(await api.invoice(session, id));
-      goTo("Invoices");
+      router.push(`/invoices/${encodeURIComponent(id)}`);
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -276,7 +340,7 @@ export function Workspace() {
     setBusy(true);
     try {
       setSelectedVendorBill(await api.vendorBill(session, id));
-      goTo("Costs");
+      router.push(`/costs/${encodeURIComponent(id)}`);
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -429,10 +493,12 @@ export function Workspace() {
         <header>
           <div>
             <p className="kicker">{user.companyName}</p>
-            <h1>{page === "New Job" ? "Create job" : page === "New Vendor Invoice" ? "Record vendor invoice" : page}</h1>
+            <h1>{page === "New Job" ? "Create job" : page === "New Vendor Invoice" ? "Record vendor invoice" : record ? ` ${page.slice(0, -1)} details` : page}</h1>
           </div>
           <div className="header-actions">
-            {page === "New Job" ? (
+            {record ? (
+              <button className="soft" onClick={() => goTo(page as NavigationPage)}>← Back to {page.toLowerCase()}</button>
+            ) : page === "New Job" ? (
               <button className="soft" onClick={closeJobPage}>
                 ← Back to jobs
               </button>
@@ -445,7 +511,7 @@ export function Workspace() {
                 Refresh
               </button>
             )}
-            {page === "Customers" && canManageOperations && (
+            {!record && page === "Customers" && canManageOperations && (
               <button
                 className="button"
                 onClick={() => {
@@ -456,12 +522,12 @@ export function Workspace() {
                 + New customer
               </button>
             )}
-            {page === "Jobs" && canManageOperations && (
+            {!record && page === "Jobs" && canManageOperations && (
               <button className="button" onClick={openNewJob}>
                 + New job
               </button>
             )}
-            {page === "Costs" && canManageBilling && (
+            {!record && page === "Costs" && canManageBilling && (
               <>
                 <button className="soft" onClick={() => { setEditingVendor(null); setDialog("vendor"); }}>
                   + Vendor
@@ -479,6 +545,12 @@ export function Workspace() {
             <button onClick={() => setError("")}>×</button>
           </div>
         )}
+        {toast && (
+          <div className="success-toast" role="status" aria-live="polite">
+            <span>{toast}</span>
+            <button aria-label="Dismiss notification" onClick={() => setToast("")}>×</button>
+          </div>
+        )}
         {busy && <div className="progress" />}
         {page === "Dashboard" && (
           <Dashboard
@@ -491,6 +563,8 @@ export function Workspace() {
         {page === "Customers" && (
           <Customers
             customers={masters.customers}
+            selectedId={record?.section === "customers" ? record.id : null}
+            onOpen={(id) => router.push(`/customers/${encodeURIComponent(id)}`)}
             canEdit={canManageOperations}
             onEdit={(value) => {
               setEditingCustomer(value);
@@ -501,11 +575,21 @@ export function Workspace() {
         {page === "Jobs" && (
           <Jobs
             jobs={jobs}
-            selected={selectedJob}
+            selected={record?.section === "jobs" ? selectedJob : null}
             canEdit={canManageOperations}
+            onDelete={() => selectedJob && void confirmAction(
+              {
+                title: "Delete this job?",
+                message: `Permanently delete ${selectedJob.jobNumber} and its containers, services and charges? Jobs with customer invoices or vendor bills cannot be deleted.`,
+                confirmLabel: "Delete job",
+                danger: true,
+              },
+              () => deleteJob(selectedJob),
+            )}
             canBill={canManageCharges}
             canInvoice={canManageBilling}
             onOpen={openJob}
+            detailOnly={false}
             onEdit={() => setDialog("job")}
             onContainer={() => setDialog("container")}
             onRemoveContainer={(id) =>
@@ -539,7 +623,7 @@ export function Workspace() {
                 () => api.createJob(session, input),
                 (value) => {
                   setSelectedJob(value);
-                  goTo("Jobs");
+                  router.push(`/jobs/${encodeURIComponent(value.id)}`);
                 },
               )
             }
@@ -565,14 +649,14 @@ export function Workspace() {
               }
             }, (value) => {
               setSelectedVendorBill(value);
-              goTo("Costs");
+              router.push(`/costs/${encodeURIComponent(value.id)}`);
             })}
           />
         )}
         {page === "Invoices" && (
           <Invoices
             invoices={invoices}
-            selected={selectedInvoice}
+            selected={record?.section === "invoices" ? selectedInvoice : null}
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
             onEdit={() => setDialog("invoiceEdit")}
@@ -582,13 +666,47 @@ export function Workspace() {
               void confirmAction(
                 {
                   title: "Create a similar job?",
-                  message: `Copy customer, shipment, services and charges from ${selectedInvoice.jobNumber}. Container numbers will start empty so you can enter the new ones.`,
+                  message: `Copy customer, shipment, services and charges from ${selectedInvoice.jobNumber}. HBL, MBL and container numbers will start empty so you can enter the new shipment details.`,
                   confirmLabel: "Create similar job",
                 },
-                () => api.createSimilarJob(session, selectedInvoice.jobId),
+                async () => {
+                  const copy = await api.createSimilarJob(session, selectedInvoice.jobId);
+                  return api.updateJob(session, copy.id, {
+                    customerId: copy.customerId,
+                    branchId: copy.branchId,
+                    transportMode: copy.transportMode,
+                    status: copy.status,
+                    plannedContainerType: copy.plannedContainerType,
+                    plannedContainerCount: copy.plannedContainerCount,
+                    polId: copy.polId,
+                    podId: copy.podId,
+                    transshipmentPortId: copy.transshipmentPortId,
+                    vessel: copy.vessel,
+                    voyage: copy.voyage,
+                    sailedDate: copy.sailedDate,
+                    originPort: copy.originPort,
+                    placeOfDelivery: copy.placeOfDelivery,
+                    shipper: copy.shipper,
+                    consignee: copy.consignee,
+                    notifyName: copy.notifyName,
+                    commodity: copy.commodity,
+                    salesPerson: copy.salesPerson,
+                    customerReference: copy.customerReference,
+                    packageCount: copy.packageCount,
+                    weightKg: copy.weightKg,
+                    volumeCbm: copy.volumeCbm,
+                    chargeableWeightKg: copy.chargeableWeightKg,
+                    customsDocReference: copy.customsDocReference,
+                    shipmentTerms: copy.shipmentTerms,
+                    hbl: null,
+                    mbl: null,
+                    containerNumbers: [],
+                    serviceIds: copy.services.map((service) => service.id),
+                  });
+                },
                 (value) => {
                   setSelectedJob(value);
-                  goTo("Jobs");
+                  router.push(`/jobs/${encodeURIComponent(value.id)}`);
                 },
               )
             }
@@ -599,15 +717,17 @@ export function Workspace() {
                 setSelectedInvoice,
               )
             }
+            detailOnly={false}
           />
         )}
         {page === "Costs" && (
           <Costs
             bills={vendorBills}
             vendors={masters.vendors}
-            selected={selectedVendorBill}
+            selected={record?.section === "costs" ? selectedVendorBill : null}
             canEdit={canManageBilling}
             onOpen={openVendorBill}
+            detailOnly={false}
             onEdit={() => setDialog("vendorBill")}
             onDelete={() => selectedVendorBill && void confirmAction({ title: "Delete vendor invoice?", message: `${selectedVendorBill.vendorInvoiceNumber} and its uploaded document will be permanently deleted.`, confirmLabel: "Delete invoice", danger: true }, () => api.removeVendorBill(session, selectedVendorBill), () => setSelectedVendorBill(null))}
             onVendor={(vendor) => { setEditingVendor(vendor); setDialog("vendor"); }}
@@ -699,7 +819,7 @@ export function Workspace() {
                 () => api.updateJob(session, selectedJob.id, input),
                 (value) => {
                   setSelectedJob(value);
-                  goTo("Jobs");
+                  router.push(`/jobs/${encodeURIComponent(value.id)}`);
                 },
               )
             }
@@ -735,13 +855,17 @@ export function Workspace() {
       {dialog === "invoice" && selectedJob && (
         <InvoiceDialog
           charges={unbilled}
+          containerCount={selectedJob.plannedContainerCount}
+          oceanServiceIds={selectedJob.services
+            .filter((service) => service.code.toUpperCase() === "OCEAN" || service.name.toLowerCase() === "ocean freight")
+            .map((service) => service.id)}
           close={() => setDialog(null)}
           save={(ids) =>
             void act(
               () => api.createDraft(session, selectedJob.id, ids),
               (value) => {
                 setSelectedInvoice(value);
-                goTo("Invoices");
+                router.push(`/invoices/${encodeURIComponent(value.id)}`);
               },
             )
           }
@@ -934,14 +1058,20 @@ function Dashboard({
 }
 function Customers({
   customers,
+  selectedId,
+  onOpen,
   canEdit,
   onEdit,
 }: {
   customers: Customer[];
+  selectedId: string | null;
+  onOpen(id: string): void;
   canEdit: boolean;
   onEdit(c: Customer): void;
 }) {
   return (
+    <>
+    <div className={selectedId ? "customer-layout customer-detail-layout" : "customer-layout"}>
     <Panel
       title="Customer master"
       sub={`${customers.length} persisted billing profiles`}
@@ -958,7 +1088,7 @@ function Customers({
           <button
             className="trow row-button"
             key={c.id}
-            onClick={() => canEdit && onEdit(c)}
+            onClick={() => onOpen(c.id)}
           >
             <div>
               <b>{c.name}</b>
@@ -972,6 +1102,16 @@ function Customers({
         ))}
       </div>
     </Panel>
+    {selectedId && (() => {
+      const customer = customers.find((item) => item.id === selectedId);
+      if (!customer) return <Panel title="Customer not found" sub="Unavailable record"><p className="empty-panel">This customer is unavailable. Return to the customer list and choose another record.</p></Panel>;
+      return <Panel title={customer.name} sub={`${customer.code} · ${customer.active ? "Active" : "Inactive"}`} action={canEdit ? "Edit customer" : undefined} onAction={() => onEdit(customer)}>
+        <div className="detail-grid"><Detail label="TRN" value={customer.trn || "—"}/><Detail label="VAT number" value={customer.vatNumber || "—"}/><Detail label="Currency" value={customer.defaultCurrency}/><Detail label="Payment terms" value={`${customer.paymentTermsDays} days`}/><Detail label="Email" value={customer.email || "—"}/><Detail label="Phone" value={customer.phone || "—"}/></div>
+        <Detail label="Billing address" value={customer.billingAddress || "Not provided"}/>
+      </Panel>;
+    })()}
+    </div>
+    </>
   );
 }
 
@@ -979,6 +1119,7 @@ function Jobs(props: {
   jobs: JobSummary[];
   selected: JobDetail | null;
   canEdit: boolean;
+  onDelete(): void;
   canBill: boolean;
   canInvoice: boolean;
   onOpen(id: string): void;
@@ -989,11 +1130,12 @@ function Jobs(props: {
   onRemoveCharge(id: string): void;
   onInvoice(): void;
   onOpenInvoice(id: string): void;
+  detailOnly: boolean;
 }) {
   const { jobs, selected } = props;
   return (
-    <div className="job-layout">
-      <Panel title="Jobs" sub={`${jobs.length} persisted records`}>
+    <div className={props.detailOnly ? "job-layout record-page" : "job-layout"}>
+      {!props.detailOnly && <Panel title="Jobs" sub={`${jobs.length} persisted records`}>
         <div className="job-list">
           {jobs.map((job) => (
             <button
@@ -1008,13 +1150,15 @@ function Jobs(props: {
             </button>
           ))}
         </div>
-      </Panel>
+      </Panel>}
       {selected ? (
         <Panel
           title={selected.jobNumber}
           sub={`${selected.customerName} · ${selected.transportMode}`}
           action={props.canEdit ? "Edit job" : undefined}
           onAction={props.onEdit}
+          secondaryAction={props.canEdit ? "Delete job" : undefined}
+          onSecondaryAction={props.onDelete}
         >
           <div className="route-summary">
             <small>Shipment route</small>
@@ -1275,6 +1419,7 @@ function Invoices({
   onCreateSimilar,
   onEdit,
   onIssue,
+  detailOnly,
 }: {
   invoices: Invoice[];
   selected: Invoice | null;
@@ -1284,6 +1429,7 @@ function Invoices({
   onCreateSimilar(): void;
   onEdit(): void;
   onIssue(): void;
+  detailOnly: boolean;
 }) {
   const [filters, setFilters] = useState<InvoiceFilters>(emptyInvoiceFilters);
   const filteredInvoices = filterInvoices(invoices, filters);
@@ -1294,8 +1440,8 @@ function Invoices({
     setFilters((current) => ({ ...current, [key]: value }));
 
   return (
-    <div className="invoice-layout">
-      <Panel
+    <div className={detailOnly ? "invoice-layout record-page" : "invoice-layout"}>
+      {!detailOnly && <Panel
         title="Invoices"
         sub={`${filteredInvoices.length} of ${invoices.length} records`}
       >
@@ -1410,7 +1556,7 @@ function Invoices({
             <p className="empty-inline">No invoices match these filters.</p>
           )}
         </div>
-      </Panel>
+      </Panel>}
       {selected ? (
         <section className="panel invoice-document">
           <div className="panel-head">
@@ -1540,7 +1686,7 @@ function Invoices({
   );
 }
 
-function Costs({ bills, vendors, selected, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument }: { bills: VendorBill[]; vendors: Vendor[]; selected: VendorBill | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void }) {
+function Costs({ bills, vendors, selected, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { bills: VendorBill[]; vendors: Vendor[]; selected: VendorBill | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
   const linkedIncome = new Map<string, number>();
   bills.forEach((bill) => {
     if (bill.customerInvoiceId) linkedIncome.set(bill.customerInvoiceId, Number(bill.revenueAllocatedAed));
@@ -1550,10 +1696,10 @@ function Costs({ bills, vendors, selected, canEdit, onOpen, onEdit, onDelete, on
   const profit = revenue - expense;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
   return <>
-    <div className="metrics cost-metrics"><Metric label="Allocated income" value={money.format(revenue)} note="Customer revenue before VAT"/><Metric label="Vendor expense" value={money.format(expense)} note="Vendor cost before VAT"/><Metric label="Gross profit" value={money.format(profit)} note="Income minus vendor expense" good={profit >= 0}/><Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0}/></div>
-    <div className="cost-layout"><Panel title="Vendor invoices" sub={`${bills.length} recorded expense${bills.length === 1 ? "" : "s"}`}><div className="invoice-list">{bills.map(bill=><button className={selected?.id===bill.id?"invoice selected":"invoice"} key={bill.id} onClick={()=>onOpen(bill.id)}><b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span><Tag text={vendorBillStatusLabel(bill.status)}/><strong>{money.format(Number(bill.totalAmountAed))}</strong></button>)}</div></Panel>
+    {!detailOnly && <div className="metrics cost-metrics"><Metric label="Allocated income" value={money.format(revenue)} note="Customer revenue before VAT"/><Metric label="Vendor expense" value={money.format(expense)} note="Vendor cost before VAT"/><Metric label="Gross profit" value={money.format(profit)} note="Income minus vendor expense" good={profit >= 0}/><Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0}/></div>}
+    <div className={detailOnly ? "cost-layout record-page" : "cost-layout"}>{!detailOnly && <Panel title="Vendor invoices" sub={`${bills.length} recorded expense${bills.length === 1 ? "" : "s"}`}><div className="invoice-list">{bills.map(bill=><button className={selected?.id===bill.id?"invoice selected":"invoice"} key={bill.id} onClick={()=>onOpen(bill.id)}><b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span><Tag text={vendorBillStatusLabel(bill.status)}/><strong>{money.format(Number(bill.totalAmountAed))}</strong></button>)}</div></Panel>}
     {selected?<section className="panel"><div className="panel-head"><div><h2>{selected.vendorInvoiceNumber}</h2><p>{selected.vendorName} · Job {selected.jobNumber}</p></div><Tag text={vendorBillStatusLabel(selected.status)}/></div>{selected.status==="DRAFT"&&<p className="status-explainer">Pending review means this older vendor invoice has not yet been approved. Verify its PDF and amount, then update its status to Approved.</p>}<div className="detail-grid"><Detail label="Vendor TRN" value={selected.vendorTrn||"—"}/><Detail label="Bill date" value={selected.billDate}/><Detail label="B/L number" value={selected.blNumber||"—"}/><div className="detail"><small>CUSTOMER INVOICE</small>{selected.customerInvoiceId?<button className="link-button" onClick={()=>onOpenInvoice(selected.customerInvoiceId!)}>{selected.customerInvoiceNumber}</button>:<b>Not linked</b>}</div><div className="detail"><small>VENDOR INVOICE PDF</small>{selected.sourceFilePath?<button className="link-button" onClick={()=>onOpenDocument(selected.sourceFilePath!)}>View {selected.sourceFileName}</button>:<b>Not uploaded</b>}</div></div><table className="charge-table"><thead><tr><th>Vendor service</th><th>Qty</th><th>Rate / FX</th><th>Cost AED</th><th>VAT</th></tr></thead><tbody>{selected.lines.map(line=><tr key={line.id}><td>{line.serviceName||line.description}<small>{line.description}</small></td><td>{line.quantity} {line.uom}</td><td>{formatChargeRate(line.currency,line.unitRate)}<small>{line.currency==="USD"?`1 USD = ${line.exchangeRate} AED`:"1 AED = 1 AED"}</small></td><td>{money.format(Number(line.netAmountAed))}</td><td>{money.format(Number(line.vatAmountAed))}</td></tr>)}</tbody></table><div className="profit-summary"><span><small>Allocated customer income</small><b>{money.format(Number(selected.revenueAllocatedAed))}</b></span><span><small>Vendor expense before VAT</small><b>{money.format(Number(selected.subtotalAed))}</b></span><span className={Number(selected.profitAed)>=0?"positive":"negative"}><small>Gross profit</small><b>{money.format(Number(selected.profitAed))}</b></span></div>{canEdit&&<div className="form-actions"><button className="danger-link" onClick={onDelete}>Delete</button><button className="button" onClick={onEdit}>{selected.status==="DRAFT"?"Review vendor invoice":"Edit vendor invoice"}</button></div>}</section>:<Panel title="Select a vendor invoice" sub="Review its expense and gross profit"><p className="empty-panel">Link vendor expenses to customer income to see job profitability.</p></Panel>}</div>
-    <Panel title="Vendor master" sub={`${vendors.length} shipping and service vendor${vendors.length===1?"":"s"}`}><div className="record-list">{vendors.length?vendors.map(vendor=><div key={vendor.id}><span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn||"No TRN"}</small></span><Tag text={vendor.active?"ACTIVE":"INACTIVE"}/>{canEdit&&<button className="link-button" onClick={()=>onVendor(vendor)}>Edit</button>}</div>):<p className="empty-inline">Add the first vendor before recording a vendor invoice.</p>}</div></Panel>
+    {!detailOnly && <Panel title="Vendor master" sub={`${vendors.length} shipping and service vendor${vendors.length===1?"":"s"}`}><div className="record-list">{vendors.length?vendors.map(vendor=><div key={vendor.id}><span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn||"No TRN"}</small></span><Tag text={vendor.active?"ACTIVE":"INACTIVE"}/>{canEdit&&<button className="link-button" onClick={()=>onVendor(vendor)}>Edit</button>}</div>):<p className="empty-inline">Add the first vendor before recording a vendor invoice.</p>}</div></Panel>}
   </>;
 }
 
@@ -2692,17 +2838,24 @@ function ChargeDialog({
 
 function InvoiceDialog({
   charges,
+  containerCount,
+  oceanServiceIds,
   close,
   save,
 }: {
   charges: Charge[];
+  containerCount: number;
+  oceanServiceIds: string[];
   close(): void;
   save(ids: string[]): void;
 }) {
   const [ids, setIds] = useState(charges.map((c) => c.id));
   const total = charges
     .filter((c) => ids.includes(c.id))
-    .reduce((sum, c) => sum + Number(c.totalAmount), 0);
+    .reduce((sum, c) => {
+      const quantity = oceanServiceIds.includes(c.serviceId) ? containerCount : Number(c.quantity);
+      return sum + chargeAmounts(quantity, Number(c.unitRate), Number(c.exchangeRate), Number(c.taxRate)).totalAed;
+    }, 0);
   return (
     <Modal title="Create draft invoice" close={close}>
       <form
@@ -2732,10 +2885,13 @@ function InvoiceDialog({
               <span>
                 {c.serviceName}
                 <small>
-                  {c.quantity} {c.uom} × {money.format(Number(c.unitRate))}
+                  {oceanServiceIds.includes(c.serviceId) ? containerCount : c.quantity} {oceanServiceIds.includes(c.serviceId) ? "CNT" : c.uom} × {formatChargeRate(c.currency, c.unitRate)}
                 </small>
               </span>
-              <b>{money.format(Number(c.totalAmount))}</b>
+              <b>{money.format(chargeAmounts(
+                oceanServiceIds.includes(c.serviceId) ? containerCount : Number(c.quantity),
+                Number(c.unitRate), Number(c.exchangeRate), Number(c.taxRate),
+              ).totalAed)}</b>
             </label>
           ))}
         </div>
@@ -3686,12 +3842,16 @@ function Panel({
   sub,
   action,
   onAction,
+  secondaryAction,
+  onSecondaryAction,
   children,
 }: {
   title: string;
   sub: string;
   action?: string;
   onAction?: () => void;
+  secondaryAction?: string;
+  onSecondaryAction?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -3701,11 +3861,18 @@ function Panel({
           <h2>{title}</h2>
           <p>{sub}</p>
         </div>
-        {action && (
-          <button className="link-button" onClick={onAction}>
-            {action}
-          </button>
-        )}
+        {(action || secondaryAction) && <div className="panel-actions">
+          {action && (
+            <button className="link-button" onClick={onAction}>
+              {action}
+            </button>
+          )}
+          {secondaryAction && (
+            <button className="danger-link" onClick={onSecondaryAction}>
+              {secondaryAction}
+            </button>
+          )}
+        </div>}
       </div>
       {children}
     </section>

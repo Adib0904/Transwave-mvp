@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { createChargeSchema, saveContainerSchema, saveJobSchema, type CreateCharge, type SaveContainer, type SaveJob } from "@transwave/contracts";
 import { SupabaseAuthGuard } from "../auth/supabase-auth.guard.js";
@@ -41,6 +41,13 @@ export class JobsController {
   @ApiOperation({ summary: "Update all editable job and route details" })
   update(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveJobSchema)) input: SaveJob) {
     return this.jobs.update(request.database, request.auth.userId, id, input);
+  }
+
+  @Delete(":id")
+  @HttpCode(204)
+  @ApiOperation({ summary: "Delete a job without linked invoices or vendor bills" })
+  remove(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) {
+    return this.jobs.remove(request.database, request.auth.userId, id);
   }
 
   @Post(":id/containers")

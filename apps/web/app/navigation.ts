@@ -22,9 +22,12 @@ export const navigationPaths: Record<Page, string> = {
 };
 
 export function pageFromPathname(pathname: string): Page {
-  if (pathname === "/") return "Dashboard";
+  const exact = Object.entries(navigationPaths).find(([, path]) => path === pathname)?.[0] as Page | undefined;
+  if (exact) return exact;
+  const basePath = pathname.split("/").filter(Boolean).slice(0, 1).join("/");
+  if (!basePath) return "Dashboard";
   return (
-    (Object.entries(navigationPaths).find(([, path]) => path === pathname)?.[0] as
+    (Object.entries(navigationPaths).find(([, path]) => path === `/${basePath}`)?.[0] as
       | Page
       | undefined) ?? "Dashboard"
   );

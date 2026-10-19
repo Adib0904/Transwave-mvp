@@ -58,6 +58,8 @@ const safeMessages: Record<string, string> = {
     "Allocated revenue exceeds the remaining customer invoice subtotal",
   INVALID_VENDOR_DOCUMENT_PATH: "The vendor document storage path is invalid",
   INVALID_VENDOR_DOCUMENT: "Upload a valid PDF vendor invoice",
+  JOB_HAS_FINANCIAL_RECORDS:
+    "This job has customer invoices or vendor bills and cannot be deleted",
 };
 
 export function throwDatabaseError(
@@ -78,9 +80,18 @@ export function throwDatabaseError(
     throw new ForbiddenException(
       safeMessage ?? "You do not have permission to perform this action",
     );
-  if (error.code === "23505" || databaseMessage.includes("UNAVAILABLE"))
+  if (
+    error.code === "23505" ||
+    error.code === "23503" ||
+    databaseMessage.includes("UNAVAILABLE") ||
+    databaseMessage.includes("JOB_HAS_FINANCIAL_RECORDS")
+  )
     throw new ConflictException(
       safeMessage ?? "A record with these details already exists",
+    );
+  if (error.code === "PGRST202" && databaseMessage.includes("delete_job"))
+    throw new BadRequestException(
+      "The database is missing the job deletion migration. Apply pending migrations and try again.",
     );
   throw new BadRequestException(safeMessage ?? fallback);
 }

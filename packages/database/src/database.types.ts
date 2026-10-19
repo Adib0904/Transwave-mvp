@@ -802,6 +802,7 @@ export type Database = {
           branch_id: string
           company_id: string
           created_at: string
+          created_by: string | null
           customer_id: string
           id: string
           job_number: string
@@ -816,6 +817,7 @@ export type Database = {
           branch_id: string
           company_id: string
           created_at?: string
+          created_by?: string | null
           customer_id: string
           id?: string
           job_number: string
@@ -830,6 +832,7 @@ export type Database = {
           branch_id?: string
           company_id?: string
           created_at?: string
+          created_by?: string | null
           customer_id?: string
           id?: string
           job_number?: string
@@ -1422,6 +1425,7 @@ export type Database = {
         Returns: string
       }
       create_similar_job: { Args: { p_source_job_id: string }; Returns: string }
+      delete_job: { Args: { p_id: string }; Returns: undefined }
       delete_vendor_bill: { Args: { p_id: string }; Returns: undefined }
       has_company_role: {
         Args: {

@@ -3,15 +3,24 @@ import { containerSchema, type Invoice, type UpdateInvoice } from "@transwave/co
 import type { Database, Json, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
-import { requireTenantRole } from "../common/tenant.js";
+import { requireTenantRole, resolveTenant } from "../common/tenant.js";
 
 type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 type InvoiceLineRow = Database["public"]["Tables"]["invoice_lines"]["Row"];
 
 @Injectable()
 export class InvoicesService {
-  async list(database: TransWaveDatabaseClient): Promise<Invoice[]> {
-    const { data: invoices, error } = await database.from("invoices").select("*").order("created_at", { ascending: false });
+  async list(database: TransWaveDatabaseClient, userId: string): Promise<Invoice[]> {
+    const tenant = await resolveTenant(database, userId);
+    let query = database
+      .from("invoices")
+      .select("*")
+      .eq("company_id", tenant.companyId)
+      .order("created_at", { ascending: false });
+    if (tenant.role !== "OWNER" && tenant.role !== "ADMIN") {
+      query = query.eq("created_by", userId);
+    }
+    const { data: invoices, error } = await query;
     if (error) throwDatabaseError(error);
     if (!invoices?.length) return [];
 
