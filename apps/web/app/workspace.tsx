@@ -558,6 +558,7 @@ export function Workspace() {
             invoices={invoices}
             onJob={openJob}
             onNavigate={nav}
+            canViewFinancials={["OWNER", "ADMIN"].includes(user.role)}
           />
         )}
         {page === "Customers" && (
@@ -1006,18 +1007,79 @@ function Dashboard({
   invoices,
   onJob,
   onNavigate,
+  canViewFinancials,
 }: {
   jobs: JobSummary[];
   invoices: Invoice[];
   onJob(id: string): void;
   onNavigate(page: Page): void;
+  canViewFinancials: boolean;
 }) {
-  const issued = invoices
-    .filter((i) => i.status === "ISSUED")
-    .reduce((sum, i) => sum + Number(i.total), 0);
+  const [revenuePeriod, setRevenuePeriod] = useState<"month" | "year" | "all">("month");
+  const now = new Date();
+  const currentYear = String(now.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const reportYears = [...new Set([
+    currentYear,
+    ...invoices.flatMap((invoice) => [invoice.paymentDate, invoice.invoiceDate, invoice.issuedAt, invoice.createdAt]
+      .filter((date): date is string => Boolean(date))
+      .map((date) => date.slice(0, 4))),
+  ])].sort((left, right) => Number(right) - Number(left));
+  const periodMatches = (date: string | null, period: "month" | "year" | "all") => {
+    if (period === "all") return true;
+    if (!date) return false;
+    const key = date.slice(0, 10);
+    return period === "month"
+      ? key.startsWith(`${selectedYear}-${selectedMonth}`)
+      : key.startsWith(selectedYear);
+  };
+  const paidInvoices = invoices.filter((invoice) => invoice.paymentStatus === "PAID");
+  const issuedInvoices = invoices.filter((invoice) => invoice.status === "ISSUED");
+  const revenueDate = (invoice: Invoice) => invoice.paymentDate;
+  const issuedDate = (invoice: Invoice) =>
+    invoice.issuedAt || invoice.invoiceDate || invoice.createdAt;
+  const selectedPaidInvoices = paidInvoices.filter((invoice) => periodMatches(revenueDate(invoice), revenuePeriod));
+  const selectedIssuedInvoices = issuedInvoices.filter((invoice) => periodMatches(issuedDate(invoice), revenuePeriod));
+  const paidRevenue = selectedPaidInvoices.reduce((sum, invoice) => sum + Number(invoice.subtotal), 0);
+  const issuedValue = selectedIssuedInvoices.reduce((sum, invoice) => sum + Number(invoice.total), 0);
+  const monthName = new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(Number(selectedYear), Number(selectedMonth) - 1, 1));
+  const periodLabel = revenuePeriod === "month" ? `${monthName} ${selectedYear}` : revenuePeriod === "year" ? selectedYear : "All time";
+  const jobStatuses: JobSummary["status"][] = ["DRAFT", "OPEN", "READY_TO_INVOICE", "COMPLETED", "CANCELLED"];
+  const jobsByStatus = jobStatuses.map((status) => ({
+    status,
+    count: jobs.filter((job) => job.status === status).length,
+  }));
+  const maxJobsByStatus = Math.max(1, ...jobsByStatus.map((item) => item.count));
+  const trendStart = revenuePeriod === "all"
+    ? new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    : new Date(Number(selectedYear), 0, 1);
+  const monthlyTrend = Array.from({ length: 12 }, (_, index) => {
+    const date = new Date(trendStart.getFullYear(), trendStart.getMonth() + index, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const monthIssued = issuedInvoices
+      .filter((invoice) => issuedDate(invoice).slice(0, 7) === key)
+      .reduce((sum, invoice) => sum + Number(invoice.total), 0);
+    const monthRevenue = paidInvoices
+      .filter((invoice) => revenueDate(invoice)?.slice(0, 7) === key)
+      .reduce((sum, invoice) => sum + Number(invoice.subtotal), 0);
+    return {
+      key,
+      label: new Intl.DateTimeFormat("en", { month: "short" }).format(date),
+      issued: monthIssued,
+      revenue: monthRevenue,
+    };
+  });
+  const maxMonthlyValue = Math.max(1, ...monthlyTrend.flatMap((item) => [item.issued, item.revenue]));
+  const invoiceStatusReport = [
+    { label: "Draft", count: invoices.filter((invoice) => invoice.status === "DRAFT").length },
+    { label: "Issued", count: issuedInvoices.length },
+    { label: "Paid", count: paidInvoices.length },
+    { label: "Unpaid", count: invoices.filter((invoice) => invoice.status === "ISSUED" && invoice.paymentStatus === "UNPAID").length },
+  ];
   return (
     <>
-      <div className="metrics">
+      <div className="metrics dashboard-overview-metrics">
         <Metric
           label="Active jobs"
           value={String(
@@ -1040,10 +1102,100 @@ function Dashboard({
           note="Not yet issued"
         />
         <Metric
-          label="Issued value"
-          value={money.format(issued)}
-          note="All issued invoices"
+          label="Completed jobs"
+          value={String(jobs.filter((job) => job.status === "COMPLETED").length)}
+          note="Finished shipments"
         />
+      </div>
+      {canViewFinancials && (
+        <section className="panel dashboard-finance-panel">
+          <div className="panel-head dashboard-finance-head">
+            <div>
+              <h2>Revenue and invoicing</h2>
+              <p>{periodLabel} · AED · collected revenue excludes VAT</p>
+            </div>
+            <div className="dashboard-period-controls">
+            <div className="dashboard-period-switch" role="group" aria-label="Revenue reporting period">
+              {(["month", "year", "all"] as const).map((period) => (
+                <button
+                  key={period}
+                  type="button"
+                  className={revenuePeriod === period ? "active" : ""}
+                  aria-pressed={revenuePeriod === period}
+                  onClick={() => setRevenuePeriod(period)}
+                >
+                  {period === "month" ? "Monthly" : period === "year" ? "Yearly" : "All time"}
+                </button>
+              ))}
+            </div>
+            {revenuePeriod !== "all" && <div className="dashboard-date-selectors">
+              {revenuePeriod === "month" && <label>
+                <span>Month</span>
+                <select value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)}>
+                  {Array.from({ length: 12 }, (_, index) => {
+                    const value = String(index + 1).padStart(2, "0");
+                    const month = new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(2000, index, 1));
+                    return <option key={value} value={value}>{month}</option>;
+                  })}
+                </select>
+              </label>}
+              <label>
+                <span>Year</span>
+                <select value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)}>
+                  {reportYears.map((year) => <option key={year} value={year}>{year}</option>)}
+                </select>
+              </label>
+            </div>}
+            </div>
+          </div>
+          <div className="metrics dashboard-finance-metrics">
+            <Metric label="Collected revenue" value={money.format(paidRevenue)} note={`${selectedPaidInvoices.length} paid invoices · before VAT`} />
+            <Metric label="Issued value" value={money.format(issuedValue)} note={`${selectedIssuedInvoices.length} issued invoices · including VAT`} />
+          </div>
+          <div className="dashboard-trend" aria-label={`Monthly collected revenue and issued invoice value${revenuePeriod === "all" ? " for the past 12 months" : ` for ${selectedYear}`}`}>
+            <div className="dashboard-trend-heading">
+              <b>Monthly trend</b>
+              <span>{revenuePeriod === "all" ? "Past 12 months" : selectedYear}</span>
+            </div>
+            <div className="dashboard-trend-legend"><span className="revenue-key">Collected revenue</span><span className="issued-key">Issued value</span></div>
+            <div className="dashboard-trend-list">
+              {monthlyTrend.map((item) => (
+                <div className="dashboard-trend-row" key={item.key}>
+                  <span>{item.label}</span>
+                  <div className="dashboard-bar-pair">
+                    <i className="revenue-bar" style={{ width: `${(item.revenue / maxMonthlyValue) * 100}%` }} title={`Revenue: ${money.format(item.revenue)}`} />
+                    <i className="issued-bar" style={{ width: `${(item.issued / maxMonthlyValue) * 100}%` }} title={`Issued: ${money.format(item.issued)}`} />
+                  </div>
+                  <small aria-label={`Collected revenue ${money.format(item.revenue)}; issued value ${money.format(item.issued)}`}>
+                    {money.format(item.revenue)} · {money.format(item.issued)}
+                  </small>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+      <div className="dashboard-reports">
+        <Panel title="Job pipeline" sub={`${jobs.length} jobs by current status`}>
+          <div className="dashboard-status-list">
+            {jobsByStatus.map(({ status, count }) => (
+              <div className="dashboard-status-row" key={status}>
+                <span>{label(status)}</span>
+                <div><i style={{ width: `${(count / maxJobsByStatus) * 100}%` }} /></div>
+                <b>{count}</b>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Invoice activity" sub={`${invoices.length} invoices in your visible records`}>
+          <div className="dashboard-invoice-stats">
+            {invoiceStatusReport.map((item) => (
+              <button key={item.label} onClick={() => onNavigate("Invoices")}>
+                <b>{item.count}</b><span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </Panel>
       </div>
       <Panel
         title="Recent jobs"
@@ -1071,7 +1223,7 @@ function Customers({
 }) {
   return (
     <>
-    <div className={selectedId ? "customer-layout customer-detail-layout" : "customer-layout"}>
+    <div className={`customer-layout${selectedId ? " customer-detail-layout mobile-customer-detail" : " mobile-customer-list"}`}>
     <Panel
       title="Customer master"
       sub={`${customers.length} persisted billing profiles`}
@@ -1134,7 +1286,7 @@ function Jobs(props: {
 }) {
   const { jobs, selected } = props;
   return (
-    <div className={props.detailOnly ? "job-layout record-page" : "job-layout"}>
+    <div className={`${props.detailOnly ? "job-layout record-page" : "job-layout"}${props.selected && !props.detailOnly ? " mobile-job-detail" : !props.detailOnly ? " mobile-job-list" : ""}`}>
       {!props.detailOnly && <Panel title="Jobs" sub={`${jobs.length} persisted records`}>
         <div className="job-list">
           {jobs.map((job) => (
@@ -1432,20 +1584,45 @@ function Invoices({
   detailOnly: boolean;
 }) {
   const [filters, setFilters] = useState<InvoiceFilters>(emptyInvoiceFilters);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const filteredInvoices = filterInvoices(invoices, filters);
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const customers = [...new Set(invoices.map((invoice) => invoice.customerName))].sort();
   const loadingPorts = [...new Set(invoices.map((invoice) => invoice.polName))].sort();
   const dischargePorts = [...new Set(invoices.map((invoice) => invoice.podName))].sort();
   const updateFilter = <K extends keyof InvoiceFilters>(key: K, value: InvoiceFilters[K]) =>
     setFilters((current) => ({ ...current, [key]: value }));
 
+  useEffect(() => {
+    const mobile = window.matchMedia("(max-width: 760px)");
+    const syncFilterVisibility = () => setFiltersOpen(!mobile.matches);
+    syncFilterVisibility();
+    mobile.addEventListener("change", syncFilterVisibility);
+    return () => mobile.removeEventListener("change", syncFilterVisibility);
+  }, []);
+
   return (
-    <div className={detailOnly ? "invoice-layout record-page" : "invoice-layout"}>
+    <div className={`${detailOnly ? "invoice-layout record-page" : "invoice-layout"}${selected && !detailOnly ? " mobile-invoice-detail" : !detailOnly ? " mobile-invoice-list" : ""}`}>
       {!detailOnly && <Panel
         title="Invoices"
         sub={`${filteredInvoices.length} of ${invoices.length} records`}
       >
-        <div className="invoice-filters">
+        <div className="invoice-filter-toolbar">
+          <div>
+            <b>Invoice filters</b>
+            <span>{activeFilterCount ? `${activeFilterCount} active` : "Narrow the list by date, customer, or status"}</span>
+          </div>
+          <button
+            className="soft compact"
+            type="button"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            {filtersOpen ? "Hide filters" : "Show filters"}
+            {activeFilterCount > 0 && <span className="filter-count">{activeFilterCount}</span>}
+          </button>
+        </div>
+        {filtersOpen && <div className="invoice-filters">
           <div className="invoice-filter-heading">
             <b>Filter invoices</b>
             {hasInvoiceFilters(filters) && (
@@ -1538,6 +1715,13 @@ function Invoices({
               </select>
             </label>
           </div>
+        </div>}
+        <div className="invoice-results-heading" aria-live="polite">
+          <div>
+            <b>Matching invoices</b>
+            <span>{filteredInvoices.length} {filteredInvoices.length === 1 ? "invoice" : "invoices"} found</span>
+          </div>
+          <span className="invoice-results-count">{filteredInvoices.length}</span>
         </div>
         <div className="invoice-list">
           {filteredInvoices.map((i) => (
@@ -1695,12 +1879,12 @@ function Costs({ bills, vendors, selected, canEdit, onOpen, onEdit, onDelete, on
   const expense = bills.reduce((sum, bill) => sum + Number(bill.subtotalAed), 0);
   const profit = revenue - expense;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-  return <>
+  return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
     {!detailOnly && <div className="metrics cost-metrics"><Metric label="Allocated income" value={money.format(revenue)} note="Customer revenue before VAT"/><Metric label="Vendor expense" value={money.format(expense)} note="Vendor cost before VAT"/><Metric label="Gross profit" value={money.format(profit)} note="Income minus vendor expense" good={profit >= 0}/><Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0}/></div>}
-    <div className={detailOnly ? "cost-layout record-page" : "cost-layout"}>{!detailOnly && <Panel title="Vendor invoices" sub={`${bills.length} recorded expense${bills.length === 1 ? "" : "s"}`}><div className="invoice-list">{bills.map(bill=><button className={selected?.id===bill.id?"invoice selected":"invoice"} key={bill.id} onClick={()=>onOpen(bill.id)}><b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span><Tag text={vendorBillStatusLabel(bill.status)}/><strong>{money.format(Number(bill.totalAmountAed))}</strong></button>)}</div></Panel>}
+    <div className={`${detailOnly ? "cost-layout record-page" : "cost-layout"}${selected && !detailOnly ? " mobile-cost-detail-layout" : !detailOnly ? " mobile-cost-list-layout" : ""}`}>{!detailOnly && <Panel title="Vendor invoices" sub={`${bills.length} recorded expense${bills.length === 1 ? "" : "s"}`}><div className="invoice-list">{bills.map(bill=><button className={selected?.id===bill.id?"invoice selected":"invoice"} key={bill.id} onClick={()=>onOpen(bill.id)}><b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span><Tag text={vendorBillStatusLabel(bill.status)}/><strong>{money.format(Number(bill.totalAmountAed))}</strong></button>)}</div></Panel>}
     {selected?<section className="panel"><div className="panel-head"><div><h2>{selected.vendorInvoiceNumber}</h2><p>{selected.vendorName} · Job {selected.jobNumber}</p></div><Tag text={vendorBillStatusLabel(selected.status)}/></div>{selected.status==="DRAFT"&&<p className="status-explainer">Pending review means this older vendor invoice has not yet been approved. Verify its PDF and amount, then update its status to Approved.</p>}<div className="detail-grid"><Detail label="Vendor TRN" value={selected.vendorTrn||"—"}/><Detail label="Bill date" value={selected.billDate}/><Detail label="B/L number" value={selected.blNumber||"—"}/><div className="detail"><small>CUSTOMER INVOICE</small>{selected.customerInvoiceId?<button className="link-button" onClick={()=>onOpenInvoice(selected.customerInvoiceId!)}>{selected.customerInvoiceNumber}</button>:<b>Not linked</b>}</div><div className="detail"><small>VENDOR INVOICE PDF</small>{selected.sourceFilePath?<button className="link-button" onClick={()=>onOpenDocument(selected.sourceFilePath!)}>View {selected.sourceFileName}</button>:<b>Not uploaded</b>}</div></div><table className="charge-table"><thead><tr><th>Vendor service</th><th>Qty</th><th>Rate / FX</th><th>Cost AED</th><th>VAT</th></tr></thead><tbody>{selected.lines.map(line=><tr key={line.id}><td>{line.serviceName||line.description}<small>{line.description}</small></td><td>{line.quantity} {line.uom}</td><td>{formatChargeRate(line.currency,line.unitRate)}<small>{line.currency==="USD"?`1 USD = ${line.exchangeRate} AED`:"1 AED = 1 AED"}</small></td><td>{money.format(Number(line.netAmountAed))}</td><td>{money.format(Number(line.vatAmountAed))}</td></tr>)}</tbody></table><div className="profit-summary"><span><small>Allocated customer income</small><b>{money.format(Number(selected.revenueAllocatedAed))}</b></span><span><small>Vendor expense before VAT</small><b>{money.format(Number(selected.subtotalAed))}</b></span><span className={Number(selected.profitAed)>=0?"positive":"negative"}><small>Gross profit</small><b>{money.format(Number(selected.profitAed))}</b></span></div>{canEdit&&<div className="form-actions"><button className="danger-link" onClick={onDelete}>Delete</button><button className="button" onClick={onEdit}>{selected.status==="DRAFT"?"Review vendor invoice":"Edit vendor invoice"}</button></div>}</section>:<Panel title="Select a vendor invoice" sub="Review its expense and gross profit"><p className="empty-panel">Link vendor expenses to customer income to see job profitability.</p></Panel>}</div>
     {!detailOnly && <Panel title="Vendor master" sub={`${vendors.length} shipping and service vendor${vendors.length===1?"":"s"}`}><div className="record-list">{vendors.length?vendors.map(vendor=><div key={vendor.id}><span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn||"No TRN"}</small></span><Tag text={vendor.active?"ACTIVE":"INACTIVE"}/>{canEdit&&<button className="link-button" onClick={()=>onVendor(vendor)}>Edit</button>}</div>):<p className="empty-inline">Add the first vendor before recording a vendor invoice.</p>}</div></Panel>}
-  </>;
+  </div>;
 }
 
 type VendorBillLineDraft = SaveVendorBill["lines"][number] & { key: string };
