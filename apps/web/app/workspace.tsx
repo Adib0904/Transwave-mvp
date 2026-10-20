@@ -303,15 +303,20 @@ export function Workspace() {
 
   useEffect(() => {
     const activeSession = sessionRef.current;
-    if (!activeSession || !record) return;
+    if (!activeSession || !record || !masters) return;
     if (record.section === "jobs" && selectedJob?.id !== record.id) {
       void api.job(activeSession, record.id).then(setSelectedJob).catch((reason) => setError(message(reason)));
     } else if (record.section === "invoices" && selectedInvoice?.id !== record.id) {
       void api.invoice(activeSession, record.id).then(setSelectedInvoice).catch((reason) => setError(message(reason)));
     } else if (record.section === "costs" && selectedVendorBill?.id !== record.id) {
-      void api.vendorBill(activeSession, record.id).then(setSelectedVendorBill).catch((reason) => setError(message(reason)));
+      const cached = vendorBills.find((bill) => bill.id === record.id);
+      if (cached) {
+        setSelectedVendorBill(cached);
+      } else {
+        void api.vendorBill(activeSession, record.id).then(setSelectedVendorBill).catch((reason) => setError(message(reason)));
+      }
     }
-  }, [pathname, record?.id, record?.section, userId, selectedJob?.id, selectedInvoice?.id, selectedVendorBill?.id]);
+  }, [pathname, record?.id, record?.section, userId, masters, vendorBills]);
 
   const goTo = (next: Page) => {
     const destination = navigationPaths[next];
@@ -389,18 +394,23 @@ export function Workspace() {
       setBusy(false);
     }
   }
-  async function openVendorBill(id: string) {
+  const openVendorBill = useCallback((id: string) => {
     if (!session) return;
-    setBusy(true);
-    try {
-      setSelectedVendorBill(await api.vendorBill(session, id));
+    const cached = vendorBills.find((bill) => bill.id === id);
+    if (cached) {
+      setSelectedVendorBill(cached);
       router.push(`/costs/${encodeURIComponent(id)}`);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setBusy(false);
+      return;
     }
-  }
+    setBusy(true);
+    void api.vendorBill(session, id)
+      .then((bill) => {
+        setSelectedVendorBill(bill);
+        router.push(`/costs/${encodeURIComponent(id)}`);
+      })
+      .catch((reason) => setError(message(reason)))
+      .finally(() => setBusy(false));
+  }, [session, vendorBills, router]);
   async function openVendorDocument(storagePath: string) {
     setBusy(true);
     setError("");
