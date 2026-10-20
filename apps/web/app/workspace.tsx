@@ -843,7 +843,12 @@ export function Workspace() {
             bills={vendorBills}
             invoices={invoices}
             vendors={masters.vendors}
-            selected={record?.section === "costs" ? selectedVendorBill : null}
+            selected={record?.section === "costs"
+              ? selectedVendorBill?.id === record.id
+                ? selectedVendorBill
+                : vendorBills.find((bill) => bill.id === record.id) ?? null
+              : null}
+            routeId={record?.section === "costs" ? record.id : null}
             canEdit={canManageBilling}
             onOpen={openVendorBill}
             detailOnly={false}
@@ -2085,7 +2090,7 @@ function Invoices({
   );
 }
 
-function Costs({ bills, invoices, vendors, selected, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { bills: VendorBill[]; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
+function Costs({ bills, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { bills: VendorBill[]; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
   const [listView, setListView] = useState<"invoices" | "vendors">("invoices");
   const [vendorSearch, setVendorSearch] = useState("");
   const [wideLayout, setWideLayout] = useState(false);
@@ -2112,6 +2117,10 @@ function Costs({ bills, invoices, vendors, selected, canEdit, onOpen, onEdit, on
   }, []);
 
   useEffect(() => {
+    if (routeId) {
+      autoSelectedFirst.current = true;
+      return;
+    }
     if (selected) {
       autoSelectedFirst.current = false;
       return;
@@ -2121,7 +2130,7 @@ function Costs({ bills, invoices, vendors, selected, canEdit, onOpen, onEdit, on
     if (!firstBill) return;
     autoSelectedFirst.current = true;
     onOpen(firstBill.id);
-  }, [wideLayout, detailOnly, selected, listView, bills, onOpen]);
+  }, [wideLayout, detailOnly, selected, routeId, listView, bills, onOpen]);
 
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
     {!detailOnly && <div className="metrics cost-metrics">
