@@ -626,6 +626,10 @@ export const updateInvoiceSchema = z.object({
   }
 });
 
+export const markInvoicePaidSchema = z.object({
+  paymentDate: z.iso.date(),
+});
+
 export const vendorBillStatusSchema = z.enum(["DRAFT", "APPROVED", "PAID"]);
 
 export const vendorBillLineInputSchema = z
@@ -743,6 +747,7 @@ export type SaveContainer = z.infer<typeof saveContainerSchema>;
 export type CreateDraft = z.infer<typeof createDraftSchema>;
 export type Invoice = z.infer<typeof invoiceSchema>;
 export type UpdateInvoice = z.infer<typeof updateInvoiceSchema>;
+export type MarkInvoicePaid = z.infer<typeof markInvoicePaidSchema>;
 export type VendorBill = z.infer<typeof vendorBillSchema>;
 export type SaveVendorBill = z.infer<typeof saveVendorBillSchema>;
 export type AttachVendorDocument = z.infer<typeof attachVendorDocumentSchema>;

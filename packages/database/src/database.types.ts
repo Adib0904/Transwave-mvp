@@ -1439,6 +1439,10 @@ export type Database = {
         Returns: boolean
       }
       issue_invoice: { Args: { p_invoice_id: string }; Returns: string }
+      mark_invoice_paid: {
+        Args: { p_invoice_id: string; p_payment_date: string }
+        Returns: string
+      }
       update_invoice: {
         Args: {
           p_customer_address: string | null

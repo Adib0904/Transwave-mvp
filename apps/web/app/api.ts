@@ -83,6 +83,7 @@ export const api = {
   invoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}`),
   createDraft: (s: Session, jobId: string, chargeIds: string[]) => call<Invoice>(s, "/invoices/drafts", { method: "POST", body: JSON.stringify({ jobId, chargeIds }) }),
   issueInvoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}/issue`, { method: "POST" }),
+  markInvoicePaid: (s: Session, id: string, paymentDate: string) => call<Invoice>(s, `/invoices/${id}/payment`, { method: "PATCH", body: JSON.stringify({ paymentDate }) }),
   updateInvoice: (s: Session, id: string, value: UpdateInvoice) => call<Invoice>(s, `/invoices/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
   vendorBills: (s: Session) => call<VendorBill[]>(s, "/vendor-bills"),
   vendorBill: (s: Session, id: string) => call<VendorBill>(s, `/vendor-bills/${id}`),
