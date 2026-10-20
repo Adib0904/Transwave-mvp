@@ -393,6 +393,7 @@ export function Workspace() {
   async function act<T>(
     work: () => Promise<T>,
     after?: (value: T) => void,
+    refreshWorkspace = true,
   ): Promise<boolean> {
     setBusy(true);
     setError("");
@@ -400,7 +401,8 @@ export function Workspace() {
       const value = await work();
       after?.(value);
       setDialog(null);
-      await load();
+      if (refreshWorkspace) await load();
+      else setBusy(false);
       return true;
     } catch (reason) {
       setError(message(reason));
@@ -412,12 +414,13 @@ export function Workspace() {
     options: Omit<Confirmation, "run" | "cancel">,
     work: () => Promise<T>,
     after?: (value: T) => void,
+    refreshWorkspace = true,
   ): Promise<boolean> {
     return new Promise((resolve) => {
       setConfirmation({
         ...options,
         run: async () => {
-          const success = await act(work, after);
+          const success = await act(work, after, refreshWorkspace);
           setConfirmation(null);
           resolve(success);
         },
@@ -674,6 +677,7 @@ export function Workspace() {
               void confirmAction({ title: "Delete charge?", message: "This job charge will be permanently deleted.", confirmLabel: "Delete charge", danger: true },
                 () => api.removeCharge(session, selectedJob!.id, id),
                 setSelectedJob,
+                false,
               )
             }
             onInvoice={() => setDialog("invoice")}
@@ -928,8 +932,8 @@ export function Workspace() {
             close={() => setDialog(null)}
             save={(input) =>
               chargeService.charge
-                ? confirmAction({ title: "Update charge?", message: `Save the revised ${chargeService.service.name} charge?`, confirmLabel: "Update charge" }, () => api.saveCharge(session, selectedJob.id, input), setSelectedJob)
-                : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob)
+                ? confirmAction({ title: "Update charge?", message: `Save the revised ${chargeService.service.name} charge?`, confirmLabel: "Update charge" }, () => api.saveCharge(session, selectedJob.id, input), setSelectedJob, false)
+                : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob, false)
             }
           />
         </EditorSurface>
