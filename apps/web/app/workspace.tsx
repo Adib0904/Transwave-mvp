@@ -135,6 +135,12 @@ const route = (job: JobSummary | JobDetail) =>
   [job.polName, job.transshipmentPortName, job.podName]
     .filter(Boolean)
     .join(" → ");
+const blLabels = (record: { hbl?: string | null; mbl?: string | null }) =>
+  [record.hbl && `HBL: ${record.hbl}`, record.mbl && `MBL: ${record.mbl}`]
+    .filter(Boolean)
+    .join(" · ");
+const normalizedBl = (value: string | null | undefined) =>
+  value?.replace(/[^a-z\d]/gi, "").toUpperCase() ?? "";
 const message = (reason: unknown) =>
   reason instanceof Error
     ? reason.message
@@ -297,15 +303,20 @@ export function Workspace() {
 
   useEffect(() => {
     const activeSession = sessionRef.current;
-    if (!activeSession || !record) return;
+    if (!activeSession || !record || !masters) return;
     if (record.section === "jobs" && selectedJob?.id !== record.id) {
       void api.job(activeSession, record.id).then(setSelectedJob).catch((reason) => setError(message(reason)));
     } else if (record.section === "invoices" && selectedInvoice?.id !== record.id) {
       void api.invoice(activeSession, record.id).then(setSelectedInvoice).catch((reason) => setError(message(reason)));
     } else if (record.section === "costs" && selectedVendorBill?.id !== record.id) {
-      void api.vendorBill(activeSession, record.id).then(setSelectedVendorBill).catch((reason) => setError(message(reason)));
+      const cached = vendorBills.find((bill) => bill.id === record.id);
+      if (cached) {
+        setSelectedVendorBill(cached);
+      } else {
+        void api.vendorBill(activeSession, record.id).then(setSelectedVendorBill).catch((reason) => setError(message(reason)));
+      }
     }
-  }, [pathname, record?.id, record?.section, userId, selectedJob?.id, selectedInvoice?.id, selectedVendorBill?.id]);
+  }, [pathname, record?.id, record?.section, userId, masters, vendorBills]);
 
   const goTo = (next: Page) => {
     const destination = navigationPaths[next];
@@ -383,18 +394,23 @@ export function Workspace() {
       setBusy(false);
     }
   }
-  async function openVendorBill(id: string) {
+  const openVendorBill = useCallback((id: string) => {
     if (!session) return;
-    setBusy(true);
-    try {
-      setSelectedVendorBill(await api.vendorBill(session, id));
+    const cached = vendorBills.find((bill) => bill.id === id);
+    if (cached) {
+      setSelectedVendorBill(cached);
       router.push(`/costs/${encodeURIComponent(id)}`);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setBusy(false);
+      return;
     }
-  }
+    setBusy(true);
+    void api.vendorBill(session, id)
+      .then((bill) => {
+        setSelectedVendorBill(bill);
+        router.push(`/costs/${encodeURIComponent(id)}`);
+      })
+      .catch((reason) => setError(message(reason)))
+      .finally(() => setBusy(false));
+  }, [session, vendorBills, router]);
   async function openVendorDocument(storagePath: string) {
     setBusy(true);
     setError("");
@@ -724,7 +740,6 @@ export function Workspace() {
             data={masters}
             jobs={jobs}
             invoices={invoices}
-            bills={vendorBills}
             draftOwner={user.userId}
             close={closeVendorInvoicePage}
             save={(input, file) => act(async () => {
@@ -828,7 +843,12 @@ export function Workspace() {
             bills={vendorBills}
             invoices={invoices}
             vendors={masters.vendors}
-            selected={record?.section === "costs" ? selectedVendorBill : null}
+            selected={record?.section === "costs"
+              ? selectedVendorBill?.id === record.id
+                ? selectedVendorBill
+                : vendorBills.find((bill) => bill.id === record.id) ?? null
+              : null}
+            routeId={record?.section === "costs" ? record.id : null}
             canEdit={canManageBilling}
             onOpen={openVendorBill}
             detailOnly={false}
@@ -1414,6 +1434,7 @@ function Jobs(props: {
               <b>{job.jobNumber}</b>
               <span>{job.customerName}</span>
               <small>{route(job)}</small>
+              {blLabels(job) && <small>{blLabels(job)}</small>}
               <Tag text={label(job.status)} />
             </button>
           ))}
@@ -1479,13 +1500,7 @@ function Jobs(props: {
               label="Customer ref"
               value={selected.customerReference || "Not captured"}
             />
-            <Detail
-              label="HBL / MBL"
-              value={
-                [selected.hbl, selected.mbl].filter(Boolean).join(" · ") ||
-                "Not captured"
-              }
-            />
+            <Detail label="Bill of lading" value={blLabels(selected) || "Not captured"} />
             <Detail
               label="Commodity"
               value={selected.commodity || "Not captured"}
@@ -1875,6 +1890,7 @@ function Invoices({
             >
               <b>{i.invoiceNumber || i.draftReference}</b>
               <span>{i.customerName}</span>
+              {blLabels(i) && <small>{blLabels(i)}</small>}
               <Tag text={i.paymentStatus === "PAID" ? "PAID" : i.status} />
               <strong>{money.format(Number(i.total))}</strong>
             </button>
@@ -2074,7 +2090,7 @@ function Invoices({
   );
 }
 
-function Costs({ bills, invoices, vendors, selected, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { bills: VendorBill[]; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
+function Costs({ bills, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { bills: VendorBill[]; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
   const [listView, setListView] = useState<"invoices" | "vendors">("invoices");
   const [vendorSearch, setVendorSearch] = useState("");
   const [wideLayout, setWideLayout] = useState(false);
@@ -2101,6 +2117,10 @@ function Costs({ bills, invoices, vendors, selected, canEdit, onOpen, onEdit, on
   }, []);
 
   useEffect(() => {
+    if (routeId) {
+      autoSelectedFirst.current = true;
+      return;
+    }
     if (selected) {
       autoSelectedFirst.current = false;
       return;
@@ -2110,7 +2130,7 @@ function Costs({ bills, invoices, vendors, selected, canEdit, onOpen, onEdit, on
     if (!firstBill) return;
     autoSelectedFirst.current = true;
     onOpen(firstBill.id);
-  }, [wideLayout, detailOnly, selected, listView, bills, onOpen]);
+  }, [wideLayout, detailOnly, selected, routeId, listView, bills, onOpen]);
 
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
     {!detailOnly && <div className="metrics cost-metrics">
@@ -2177,11 +2197,12 @@ function defaultVendorBillRemarks(invoice?: Invoice | null) {
 
 function VendorDialog({initial,close,save}:{initial:Vendor|null;close():void;save(value:SaveVendor):void}) { return <Modal title={initial?"Edit vendor":"Add vendor"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),address:nullable(d,"address"),defaultCurrency:String(d.get("currency")) as "AED"|"USD",paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Vendor ID</span><b>{initial?.code||"Created automatically"}</b><small>Vendor invoices and costs remain linked to this record.</small></div><Field label="Legal name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="TRN / VAT number"><input name="trn" defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Address"><textarea name="address" rows={3} defaultValue={initial?.address||""}/></Field><div className="three"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Default currency"><select name="currency" defaultValue={initial?.defaultCurrency||"AED"}><option>USD</option><option>AED</option></select></Field><Field label="Payment terms"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field></div><FormButtons label="Save vendor" close={close}/></form></Modal>; }
 
-function NewVendorInvoiceEditor({data,jobs,invoices,bills,draftOwner,close,save}:{data:MasterData;jobs:JobSummary[];invoices:Invoice[];bills:VendorBill[];draftOwner:string;close():void;save(value:SaveVendorBill,file:File):Promise<boolean>}) {
+function NewVendorInvoiceEditor({data,jobs,invoices,draftOwner,close,save}:{data:MasterData;jobs:JobSummary[];invoices:Invoice[];draftOwner:string;close():void;save(value:SaveVendorBill,file:File):Promise<boolean>}) {
   const [vendorId,setVendorId]=useState("");
   const [jobId,setJobId]=useState("");
   const [jobSearch,setJobSearch]=useState("");
   const [customerInvoiceId,setCustomerInvoiceId]=useState("");
+  const [invoiceSearch,setInvoiceSearch]=useState("");
   const [totalAmount,setTotalAmount]=useState("");
   const [currency,setCurrency]=useState<"AED"|"USD">("AED");
   const [exchangeRate,setExchangeRate]=useState("1");
@@ -2190,14 +2211,16 @@ function NewVendorInvoiceEditor({data,jobs,invoices,bills,draftOwner,close,save}
   const [documentCompressing,setDocumentCompressing]=useState(false);
   const [documentSizeSummary,setDocumentSizeSummary]=useState("");
   const [restoredAt,setRestoredAt]=useState("");
+  const [savedDraft,setSavedDraft]=useState<Awaited<ReturnType<typeof readVendorInvoiceDraft>>>(null);
   const draftReady=useRef(false);
   const remarksManuallyEdited=useRef(false);
   const jobOptions=Array.from(new Map([
-    ...jobs.map(job=>[job.id,{id:job.id,jobNumber:job.jobNumber,customerName:job.customerName}] as const),
-    ...invoices.map(invoice=>[invoice.jobId,{id:invoice.jobId,jobNumber:invoice.jobNumber,customerName:invoice.customerName}] as const),
+    ...jobs.map(job=>[job.id,{id:job.id,jobNumber:job.jobNumber,customerName:job.customerName,hbl:job.hbl,mbl:job.mbl}] as const),
+    ...invoices.map(invoice=>[invoice.jobId,{id:invoice.jobId,jobNumber:invoice.jobNumber,customerName:invoice.customerName,hbl:invoice.hbl,mbl:invoice.mbl}] as const),
   ]).values());
-  const availableJobs=jobOptions.filter(job=>!bills.some(bill=>bill.jobId===job.id)&&`${job.jobNumber} ${job.customerName}`.toLowerCase().includes(jobSearch.trim().toLowerCase()));
-  const availableInvoices=invoices.filter(invoice=>invoice.jobId===jobId);
+  const availableJobs=jobOptions.filter(job=>`${job.jobNumber} ${job.customerName} ${job.hbl||""} ${job.mbl||""}`.toLowerCase().includes(jobSearch.trim().toLowerCase()));
+  const availableInvoices=invoices.filter(invoice=>invoice.jobId===jobId&&(invoice.id===customerInvoiceId||`${invoice.invoiceNumber||invoice.draftReference} ${invoice.hbl||""} ${invoice.mbl||""} ${invoice.customerName}`.toLowerCase().includes(invoiceSearch.trim().toLowerCase())));
+  const selectedJob=jobOptions.find(job=>job.id===jobId);
   const linkedInvoice=invoices.find(invoice=>invoice.id===customerInvoiceId);
   const expenseAed=chargeAmounts(1,Number(totalAmount)||0,currency==="AED"?1:Number(exchangeRate)||0,0).netAed;
   const incomeAed=Number(linkedInvoice?.subtotal||0);
@@ -2210,10 +2233,10 @@ function NewVendorInvoiceEditor({data,jobs,invoices,bills,draftOwner,close,save}
 
   useEffect(()=>{
     let active=true;
-    void readVendorInvoiceDraft(draftOwner).then(async (draft)=>{
+    void readVendorInvoiceDraft(draftOwner).then((draft)=>{
       if(!active)return;
-      if(draft){setVendorId(draft.vendorId);setJobId(draft.jobId);setCustomerInvoiceId(draft.customerInvoiceId);setTotalAmount(draft.totalAmount);setCurrency(draft.currency);setExchangeRate(draft.exchangeRate);setRemarks(draft.remarks);remarksManuallyEdited.current=Boolean(draft.remarks);if(draft.document){setDocumentCompressing(true);const result=await prepareVendorInvoicePdf(draft.document);if(!active)return;setDocument(result.file);setDocumentSizeSummary(vendorInvoicePdfSizeSummary(result));setDocumentCompressing(false)}setRestoredAt(draft.savedAt)}
-      draftReady.current=true;
+      setSavedDraft(draft);
+      draftReady.current=!draft;
     }).catch(()=>{draftReady.current=true});
     return()=>{active=false};
   },[draftOwner]);
@@ -2224,13 +2247,18 @@ function NewVendorInvoiceEditor({data,jobs,invoices,bills,draftOwner,close,save}
     return()=>window.clearTimeout(timer);
   },[customerInvoiceId,currency,document,draftOwner,exchangeRate,jobId,remarks,totalAmount,vendorId]);
 
-  return <section className="panel vendor-invoice-editor"><div className="simple-flow-note"><b>Simple vendor invoice entry</b><span>Upload the PDF as the source of truth. Only the accounting total and the records it belongs to are captured here.</span>{restoredAt&&<small>Draft restored from {new Date(restoredAt).toLocaleString()}.</small>}</div><form onSubmit={event=>{event.preventDefault();if(!document)return;const invoiceNumber=document.name.replace(/\.pdf$/i,"").trim()||`VENDOR-${Date.now()}`;void save({vendorId,jobId,customerInvoiceId:customerInvoiceId||null,vendorInvoiceNumber:invoiceNumber,billDate:new Date().toISOString().slice(0,10),dueDate:null,dateOfSupply:null,blNumber:null,department:null,remarks:remarks||null,sourceFileName:null,status:"DRAFT",revenueAllocatedAed:"0.00",lines:[{serviceId:null,description:"Vendor invoice total",quantity:"1",uom:"INV",currency,exchangeRate:currency==="AED"?"1":exchangeRate,unitRate:totalAmount,taxRate:"0"}]},document).then(success=>{if(success)void clearVendorInvoiceDraft(draftOwner)})}}><FormSection title="Invoice and links" note="The PDF keeps the detailed invoice information"><div className="two"><Field label="Vendor"><select required value={vendorId} onChange={event=>setVendorId(event.target.value)}><option value="">Select vendor</option>{data.vendors.filter(vendor=>vendor.active).map(vendor=><option key={vendor.id} value={vendor.id}>{vendor.name} · {vendor.code}</option>)}</select></Field><div className="job-picker"><Field label="Find job"><input type="search" value={jobSearch} onChange={event=>setJobSearch(event.target.value)} placeholder="Search by job number or customer" /></Field><Field label={`Job (${availableJobs.length} available)`}><select required value={jobId} onChange={event=>{const nextJobId=event.target.value;setJobId(nextJobId);setCustomerInvoiceId("");if(!remarksManuallyEdited.current)setRemarks(defaultVendorBillRemarks(invoices.find(invoice=>invoice.jobId===nextJobId)))}}><option value="">Select job</option>{availableJobs.map(job=><option key={job.id} value={job.id}>{job.jobNumber} · {job.customerName}</option>)}</select></Field></div></div><Field label="Vendor invoice PDF"><input className="file-input" type="file" accept="application/pdf,.pdf" required={!document} onChange={event=>void prepareDocument(event.target.files?.[0]||null)}/><small className="input-help pdf-optimization-status">{documentCompressing?"Optimizing invoice PDF…":document?`Ready to upload: ${document.name}. ${documentSizeSummary} This selection is preserved in your draft.`:"PDF only, maximum 25 MB. The file is optimized without reducing text or print clarity."}</small></Field><Field label="Customer invoice to compare"><select value={customerInvoiceId} onChange={event=>{const id=event.target.value;setCustomerInvoiceId(id);if(!remarksManuallyEdited.current)setRemarks(defaultVendorBillRemarks(invoices.find(invoice=>invoice.id===id)))}}><option value="">Link later</option>{availableInvoices.map(invoice=><option key={invoice.id} value={invoice.id}>{invoice.invoiceNumber||invoice.draftReference} · {money.format(Number(invoice.subtotal))} before VAT</option>)}</select></Field></FormSection><FormSection title="Expense total" note="One total replaces manual service-line entry"><div className="three"><Field label="Currency"><select value={currency} onChange={event=>{const value=event.target.value as "AED"|"USD";setCurrency(value);setExchangeRate(value==="AED"?"1":"3.685")}}><option>AED</option><option>USD</option></select></Field><Field label={`Total amount (${currency})`}><input required type="number" min="0.01" step="0.01" value={totalAmount} onChange={event=>setTotalAmount(event.target.value)} placeholder="0.00"/></Field><Field label="USD to AED exchange rate"><input required type="number" min="0.00000001" step="0.00000001" disabled={currency==="AED"} value={currency==="AED"?"1":exchangeRate} onChange={event=>setExchangeRate(event.target.value)}/></Field></div><div className="profit-preview"><span>Customer income <b>{customerInvoiceId?money.format(incomeAed):"Link an invoice"}</b></span><span>Vendor expense <b>{money.format(expenseAed)}</b></span><strong className={incomeAed-expenseAed>=0?"positive":"negative"}>Estimated gross profit <b>{customerInvoiceId?money.format(incomeAed-expenseAed):"—"}</b></strong></div><Field label="Internal remarks (optional)"><textarea rows={2} value={remarks} onChange={event=>{remarksManuallyEdited.current=true;setRemarks(event.target.value)}}/></Field></FormSection><FormButtons label="Save vendor invoice" close={close} disabled={!vendorId||!jobId||!document||documentCompressing||Number(totalAmount)<=0}/></form></section>;
+  const restoreDraft=()=>{if(!savedDraft)return;setVendorId(savedDraft.vendorId);setJobId(savedDraft.jobId);setCustomerInvoiceId(savedDraft.customerInvoiceId);setTotalAmount(savedDraft.totalAmount);setCurrency(savedDraft.currency);setExchangeRate(savedDraft.exchangeRate);setRemarks(savedDraft.remarks);remarksManuallyEdited.current=Boolean(savedDraft.remarks);setDocument(savedDraft.document);setDocumentSizeSummary(savedDraft.document?"Restored saved PDF":"");setRestoredAt(savedDraft.savedAt);setSavedDraft(null);draftReady.current=true};
+  const clearDraft=async()=>{await clearVendorInvoiceDraft(draftOwner);setSavedDraft(null);draftReady.current=true;setVendorId("");setJobId("");setJobSearch("");setCustomerInvoiceId("");setInvoiceSearch("");setTotalAmount("");setCurrency("AED");setExchangeRate("1");setRemarks("");setDocument(null);setDocumentSizeSummary("");setDocumentCompressing(false);setRestoredAt("");remarksManuallyEdited.current=false};
+  const beginBlankDraft=()=>{if(savedDraft){void clearVendorInvoiceDraft(draftOwner);setSavedDraft(null)}draftReady.current=true};
+  return <section className="panel vendor-invoice-editor"><div className="simple-flow-note"><b>Simple vendor invoice entry</b><span>Upload the PDF as the source of truth. Only the accounting total and the records it belongs to are captured here.</span>{savedDraft&&<><small>A saved draft is available from {new Date(savedDraft.savedAt).toLocaleString()}. This form starts with a blank invoice.</small><div className="draft-actions"><button className="soft compact" type="button" onClick={restoreDraft}>Restore saved draft</button><button className="link-button" type="button" onClick={()=>void clearDraft()}>Discard saved draft</button></div></>}{restoredAt&&<small>Restored draft from {new Date(restoredAt).toLocaleString()}.</small>}</div><form onFocusCapture={beginBlankDraft} onSubmit={event=>{event.preventDefault();if(!document)return;const invoiceNumber=document.name.replace(/\.pdf$/i,"").trim()||`VENDOR-${Date.now()}`;void save({vendorId,jobId,customerInvoiceId:customerInvoiceId||null,vendorInvoiceNumber:invoiceNumber,billDate:new Date().toISOString().slice(0,10),dueDate:null,dateOfSupply:null,blNumber:linkedInvoice?.hbl||linkedInvoice?.mbl||selectedJob?.hbl||selectedJob?.mbl||null,department:null,remarks:remarks||null,sourceFileName:null,status:"DRAFT",revenueAllocatedAed:"0.00",lines:[{serviceId:null,description:"Vendor invoice total",quantity:"1",uom:"INV",currency,exchangeRate:currency==="AED"?"1":exchangeRate,unitRate:totalAmount,taxRate:"0"}]},document).then(success=>{if(success)void clearVendorInvoiceDraft(draftOwner)})}}><FormSection title="Invoice and links" note="The PDF keeps the detailed invoice information"><div className="two"><Field label="Vendor"><select required value={vendorId} onChange={event=>setVendorId(event.target.value)}><option value="">Select vendor</option>{data.vendors.filter(vendor=>vendor.active).map(vendor=><option key={vendor.id} value={vendor.id}>{vendor.name} · {vendor.code}</option>)}</select></Field><div className="job-picker"><Field label="Find job"><input type="search" value={jobSearch} onChange={event=>setJobSearch(event.target.value)} placeholder="Search by job number, customer, or B/L" /></Field><Field label={`Job (${availableJobs.length} available)`}><select required value={jobId} onChange={event=>{const nextJobId=event.target.value;setJobId(nextJobId);const nextJob=jobOptions.find(job=>job.id===nextJobId);const selectedBl=nextJob?.hbl||nextJob?.mbl||"";const matching=invoices.filter(invoice=>invoice.jobId===nextJobId&&selectedBl&&[invoice.hbl,invoice.mbl].some(value=>normalizedBl(value)===normalizedBl(selectedBl)));setCustomerInvoiceId(matching.length===1?matching[0].id:"");if(!remarksManuallyEdited.current)setRemarks(defaultVendorBillRemarks(matching[0]||invoices.find(invoice=>invoice.jobId===nextJobId)))}}><option value="">Select job</option>{availableJobs.map(job=><option key={job.id} value={job.id}>{job.jobNumber} · {job.customerName}{blLabels(job)?` · ${blLabels(job)}`:""}</option>)}</select></Field></div></div><Field label="Vendor invoice PDF"><input className="file-input" type="file" accept="application/pdf,.pdf" required={!document} onChange={event=>void prepareDocument(event.target.files?.[0]||null)}/><small className="input-help pdf-optimization-status">{documentCompressing?"Optimizing invoice PDF…":document?`Ready to upload: ${document.name}. ${documentSizeSummary} This selection is preserved in your draft.`:"PDF only, maximum 25 MB. The file is optimized without reducing text or print clarity."}</small></Field><Field label="Find customer invoice by B/L or number"><input type="search" value={invoiceSearch} onChange={event=>setInvoiceSearch(event.target.value)} placeholder="Type a B/L or invoice number" /></Field><Field label="Customer invoice to compare"><select value={customerInvoiceId} onChange={event=>{const id=event.target.value;setCustomerInvoiceId(id);const invoice=invoices.find(item=>item.id===id);if(!remarksManuallyEdited.current)setRemarks(defaultVendorBillRemarks(invoice))}}><option value="">Link later</option>{availableInvoices.map(invoice=><option key={invoice.id} value={invoice.id}>{invoice.invoiceNumber||invoice.draftReference}{blLabels(invoice)?` · ${blLabels(invoice)}`:""} · ${money.format(Number(invoice.subtotal))} before VAT</option>)}</select></Field></FormSection><FormSection title="Expense total" note="One total replaces manual service-line entry"><div className="three"><Field label="Currency"><select value={currency} onChange={event=>{const value=event.target.value as "AED"|"USD";setCurrency(value);setExchangeRate(value==="AED"?"1":"3.685")}}><option>AED</option><option>USD</option></select></Field><Field label={`Total amount (${currency})`}><input required type="number" min="0.01" step="0.01" value={totalAmount} onChange={event=>setTotalAmount(event.target.value)} placeholder="0.00"/></Field><Field label="USD to AED exchange rate"><input required type="number" min="0.00000001" step="0.00000001" disabled={currency==="AED"} value={currency==="AED"?"1":exchangeRate} onChange={event=>setExchangeRate(event.target.value)}/></Field></div><div className="profit-preview"><span>Customer income <b>{customerInvoiceId?money.format(incomeAed):"Link an invoice"}</b></span><span>Vendor expense <b>{money.format(expenseAed)}</b></span><strong className={incomeAed-expenseAed>=0?"positive":"negative"}>Estimated gross profit <b>{customerInvoiceId?money.format(incomeAed-expenseAed):"—"}</b></strong></div><Field label="Internal remarks (optional)"><textarea rows={2} value={remarks} onChange={event=>{remarksManuallyEdited.current=true;setRemarks(event.target.value)}}/></Field></FormSection><FormButtons label="Save vendor invoice" close={close} disabled={!vendorId||!jobId||!document||documentCompressing||Number(totalAmount)<=0}/></form></section>;
 }
 
 function VendorBillDialog({initial,data,jobs,invoices,bills,close,save}:{initial:VendorBill|null;data:MasterData;jobs:JobSummary[];invoices:Invoice[];bills:VendorBill[];close():void;save(value:SaveVendorBill,file:File|null):void}) {
   const [jobId,setJobId]=useState(initial?.jobId||"");
   const [jobSearch,setJobSearch]=useState("");
   const [customerInvoiceId,setCustomerInvoiceId]=useState(initial?.customerInvoiceId||"");
+  const [invoiceSearch,setInvoiceSearch]=useState("");
+  const [blNumber,setBlNumber]=useState(initial?.blNumber||"");
   const [remarks,setRemarks]=useState(initial?.remarks||"");
   const remarksManuallyEdited=useRef(Boolean(initial?.remarks));
   const [document,setDocument]=useState<File|null>(null);
@@ -2238,11 +2266,12 @@ function VendorBillDialog({initial,data,jobs,invoices,bills,close,save}:{initial
   const [documentSizeSummary,setDocumentSizeSummary]=useState("");
   const [lines,setLines]=useState<VendorBillLineDraft[]>(initial?.lines.map(line=>({key:line.id,serviceId:line.serviceId,description:line.description,quantity:line.quantity,uom:line.uom,currency:line.currency as "AED"|"USD",exchangeRate:line.exchangeRate,unitRate:line.unitRate,taxRate:line.taxRate}))||[newVendorBillLine()]);
   const jobOptions = Array.from(new Map([
-    ...jobs.map(job => [job.id, { id: job.id, jobNumber: job.jobNumber, customerName: job.customerName }] as const),
-    ...invoices.map(invoice => [invoice.jobId, { id: invoice.jobId, jobNumber: invoice.jobNumber, customerName: invoice.customerName }] as const),
+    ...jobs.map(job => [job.id, { id: job.id, jobNumber: job.jobNumber, customerName: job.customerName, hbl: job.hbl, mbl: job.mbl }] as const),
+    ...invoices.map(invoice => [invoice.jobId, { id: invoice.jobId, jobNumber: invoice.jobNumber, customerName: invoice.customerName, hbl: invoice.hbl, mbl: invoice.mbl }] as const),
   ]).values());
-  const availableJobs=jobOptions.filter(job=>(job.id===initial?.jobId||!bills.some(bill=>bill.jobId===job.id))&&`${job.jobNumber} ${job.customerName}`.toLowerCase().includes(jobSearch.trim().toLowerCase()));
-  const availableInvoices=invoices.filter(invoice=>invoice.jobId===jobId);
+  const availableJobs=jobOptions.filter(job=>(job.id===initial?.jobId||!bills.some(bill=>bill.jobId===job.id))&&`${job.jobNumber} ${job.customerName} ${job.hbl||""} ${job.mbl||""}`.toLowerCase().includes(jobSearch.trim().toLowerCase()));
+  const availableInvoices=invoices.filter(invoice=>invoice.jobId===jobId&&(invoice.id===customerInvoiceId||`${invoice.invoiceNumber||invoice.draftReference} ${invoice.hbl||""} ${invoice.mbl||""} ${invoice.customerName}`.toLowerCase().includes(invoiceSearch.trim().toLowerCase())));
+  const selectedJob=jobOptions.find(job=>job.id===jobId);
   const linkedIncome = Number(invoices.find(invoice => invoice.id === customerInvoiceId)?.subtotal ?? 0);
   const expense=lines.reduce((sum,line)=>sum+chargeAmounts(Number(line.quantity)||0,Number(line.unitRate)||0,line.currency==="AED"?1:Number(line.exchangeRate)||0,Number(line.taxRate)||0).netAed,0);
   const updateLine=(key:string,values:Partial<VendorBillLineDraft>)=>setLines(current=>current.map(line=>line.key===key?{...line,...values}:line));
@@ -2252,9 +2281,9 @@ function VendorBillDialog({initial,data,jobs,invoices,bills,close,save}:{initial
     try{const result=await prepareVendorInvoicePdf(file);setDocument(result.file);setDocumentSizeSummary(vendorInvoicePdfSizeSummary(result))}
     finally{setDocumentCompressing(false)}
   };
-  return <Modal title={initial?"Edit vendor invoice":"Record vendor invoice"} wide close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({vendorId:String(d.get("vendor")),jobId,customerInvoiceId:customerInvoiceId||null,vendorInvoiceNumber:String(d.get("number")),billDate:String(d.get("billDate")),dueDate:String(d.get("dueDate"))||null,dateOfSupply:String(d.get("supplyDate"))||null,blNumber:nullable(d,"bl"),department:nullable(d,"department"),remarks:nullable(d,"remarks"),sourceFileName:initial?.sourceFileName||null,status:String(d.get("status")) as SaveVendorBill["status"],revenueAllocatedAed:"0.00",lines:lines.map(({key,...line})=>line)},document)}}><FormSection title="Vendor invoice" note="Supplier, job and source document"><div className="three"><Field label="Vendor"><select name="vendor" required defaultValue={initial?.vendorId||""}><option value="">Select vendor</option>{data.vendors.filter(v=>v.active||v.id===initial?.vendorId).map(v=><option value={v.id} key={v.id}>{v.name} · {v.code}</option>)}</select></Field><div className="job-picker"><Field label="Find job"><input type="search" value={jobSearch} onChange={event=>setJobSearch(event.target.value)} placeholder="Search by job number or customer" /></Field><Field label={`Job (${availableJobs.length} available)`}><select name="job" required value={jobId} onChange={event=>{const nextJobId=event.target.value;setJobId(nextJobId);setCustomerInvoiceId("");if(!remarksManuallyEdited.current)setRemarks(defaultVendorBillRemarks(invoices.find(invoice=>invoice.jobId===nextJobId)))}}><option value="">Select job</option>{availableJobs.map(job=><option value={job.id} key={job.id}>{job.jobNumber} · {job.customerName}</option>)}</select></Field></div><Field label="Vendor invoice no."><input name="number" required defaultValue={initial?.vendorInvoiceNumber}/></Field></div><div className="three"><Field label="Invoice date"><input name="billDate" type="date" required defaultValue={initial?.billDate||new Date().toISOString().slice(0,10)}/></Field><Field label="Date of supply"><input name="supplyDate" type="date" defaultValue={initial?.dateOfSupply||""}/></Field><Field label="Due date"><input name="dueDate" type="date" defaultValue={initial?.dueDate||""}/></Field></div><div className="three"><Field label="B/L number"><input name="bl" defaultValue={initial?.blNumber||""}/></Field><Field label="Department"><input name="department" defaultValue={initial?.department||""}/></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"DRAFT"}><option>DRAFT</option><option>APPROVED</option><option>PAID</option></select></Field></div><Field label={initial?.sourceFilePath?"Replace vendor invoice PDF":"Upload vendor invoice PDF"}><input className="file-input" type="file" accept="application/pdf,.pdf" required={!initial?.sourceFilePath} onChange={event=>void prepareDocument(event.target.files?.[0]||null)}/><small className="input-help pdf-optimization-status">{documentCompressing?"Optimizing invoice PDF…":document?`Ready to upload: ${document.name}. ${documentSizeSummary}`:initial?.sourceFileName?`Currently uploaded: ${initial.sourceFileName}. Select a new PDF only to replace it.`:"PDF only, maximum 25 MB. The file is optimized without reducing text or print clarity."}</small></Field></FormSection>
+  return <Modal title={initial?"Edit vendor invoice":"Record vendor invoice"} wide close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({vendorId:String(d.get("vendor")),jobId,customerInvoiceId:customerInvoiceId||null,vendorInvoiceNumber:String(d.get("number")),billDate:String(d.get("billDate")),dueDate:String(d.get("dueDate"))||null,dateOfSupply:String(d.get("supplyDate"))||null,blNumber:blNumber.trim()||null,department:nullable(d,"department"),remarks:nullable(d,"remarks"),sourceFileName:initial?.sourceFileName||null,status:String(d.get("status")) as SaveVendorBill["status"],revenueAllocatedAed:"0.00",lines:lines.map(({key,...line})=>line)},document)}}><FormSection title="Vendor invoice" note="Supplier, job and source document"><div className="three"><Field label="Vendor"><select name="vendor" required defaultValue={initial?.vendorId||""}><option value="">Select vendor</option>{data.vendors.filter(v=>v.active||v.id===initial?.vendorId).map(v=><option value={v.id} key={v.id}>{v.name} · {v.code}</option>)}</select></Field><div className="job-picker"><Field label="Find job"><input type="search" value={jobSearch} onChange={event=>setJobSearch(event.target.value)} placeholder="Search by job number, customer, or B/L" /></Field><Field label={`Job (${availableJobs.length} available)`}><select name="job" required value={jobId} onChange={event=>{const nextJobId=event.target.value;setJobId(nextJobId);const nextJob=jobOptions.find(job=>job.id===nextJobId);const selectedBl=nextJob?.hbl||nextJob?.mbl||"";setBlNumber(selectedBl);const matching=invoices.filter(invoice=>invoice.jobId===nextJobId&&selectedBl&&[invoice.hbl,invoice.mbl].some(value=>normalizedBl(value)===normalizedBl(selectedBl)));setCustomerInvoiceId(matching.length===1?matching[0].id:"");if(!remarksManuallyEdited.current)setRemarks(defaultVendorBillRemarks(matching[0]||invoices.find(invoice=>invoice.jobId===nextJobId)))}}><option value="">Select job</option>{availableJobs.map(job=><option value={job.id} key={job.id}>{job.jobNumber} · {job.customerName}{blLabels(job)?` · ${blLabels(job)}`:""}</option>)}</select></Field></div><Field label="Vendor invoice no."><input name="number" required defaultValue={initial?.vendorInvoiceNumber}/></Field></div><div className="three"><Field label="Invoice date"><input name="billDate" type="date" required defaultValue={initial?.billDate||new Date().toISOString().slice(0,10)}/></Field><Field label="Date of supply"><input name="supplyDate" type="date" defaultValue={initial?.dateOfSupply||""}/></Field><Field label="Due date"><input name="dueDate" type="date" defaultValue={initial?.dueDate||""}/></Field></div><div className="three"><Field label="B/L number"><input name="bl" value={blNumber} onChange={event=>{const value=event.target.value;setBlNumber(value);const normalized=normalizedBl(value);const matching=invoices.filter(invoice=>invoice.jobId===jobId&&normalized&&[invoice.hbl,invoice.mbl].some(candidate=>normalizedBl(candidate)===normalized));if(matching.length===1)setCustomerInvoiceId(matching[0].id)}}/></Field><Field label="Department"><input name="department" defaultValue={initial?.department||""}/></Field><Field label="Status"><select name="status" defaultValue={initial?.status||"DRAFT"}><option>DRAFT</option><option>APPROVED</option><option>PAID</option></select></Field></div><Field label={initial?.sourceFilePath?"Replace vendor invoice PDF":"Upload vendor invoice PDF"}><input className="file-input" type="file" accept="application/pdf,.pdf" required={!initial?.sourceFilePath} onChange={event=>void prepareDocument(event.target.files?.[0]||null)}/><small className="input-help pdf-optimization-status">{documentCompressing?"Optimizing invoice PDF…":document?`Ready to upload: ${document.name}. ${documentSizeSummary}`:initial?.sourceFileName?`Currently uploaded: ${initial.sourceFileName}. Select a new PDF only to replace it.`:"PDF only, maximum 25 MB. The file is optimized without reducing text or print clarity."}</small></Field></FormSection>
   <FormSection title="Expense lines" note="Amounts are converted and reported in AED"><div className="vendor-line-head"><span>Description / service</span><span>Qty / unit</span><span>Currency / FX</span><span>Rate</span><span>VAT %</span></div>{lines.map((line,index)=><div className="vendor-line" key={line.key}><div><select aria-label={`Line ${index+1} service`} value={line.serviceId||""} onChange={event=>{const service=data.services.find(item=>item.id===event.target.value);updateLine(line.key,{serviceId:event.target.value||null,description:line.description||service?.name||"",uom:line.uom||service?.defaultUom||"JOB"})}}><option value="">Other expense</option>{data.services.map(service=><option value={service.id} key={service.id}>{service.name}</option>)}</select><input aria-label={`Line ${index+1} description`} required value={line.description} onChange={event=>updateLine(line.key,{description:event.target.value})} placeholder="Ocean freight"/></div><div><input aria-label={`Line ${index+1} quantity`} required type="number" min="0.001" step="0.001" value={line.quantity} onChange={event=>updateLine(line.key,{quantity:event.target.value})}/><input aria-label={`Line ${index+1} unit`} required value={line.uom} onChange={event=>updateLine(line.key,{uom:event.target.value})}/></div><div><select aria-label={`Line ${index+1} currency`} value={line.currency} onChange={event=>updateLine(line.key,{currency:event.target.value as "AED"|"USD",exchangeRate:event.target.value==="AED"?"1":"3.685"})}><option>AED</option><option>USD</option></select><input aria-label={`Line ${index+1} exchange rate`} required type="number" min="0.00000001" step="0.00000001" disabled={line.currency==="AED"} value={line.currency==="AED"?"1":line.exchangeRate} onChange={event=>updateLine(line.key,{exchangeRate:event.target.value})}/></div><input aria-label={`Line ${index+1} rate`} required type="number" min="0" step="0.01" value={line.unitRate} onChange={event=>updateLine(line.key,{unitRate:event.target.value})}/><div><input aria-label={`Line ${index+1} VAT`} required type="number" min="0" step="0.01" value={line.taxRate} onChange={event=>updateLine(line.key,{taxRate:event.target.value})}/><button className="danger-link" type="button" disabled={lines.length===1} onClick={()=>setLines(current=>current.filter(item=>item.key!==line.key))}>Remove</button></div></div>)}<button className="link-button" type="button" onClick={()=>setLines(current=>[...current,newVendorBillLine()])}>+ Add expense line</button><div className="dialog-total"><span>Vendor expense before VAT</span><b>{money.format(expense)}</b></div></FormSection>
-  <FormSection title="Customer invoice and profit" note="Customer income is taken automatically from the linked invoice"><Field label="Customer invoice"><select name="customerInvoice" value={customerInvoiceId} onChange={event=>{const id=event.target.value;setCustomerInvoiceId(id);if(!remarksManuallyEdited.current)setRemarks(defaultVendorBillRemarks(invoices.find(invoice=>invoice.id===id)))}}><option value="">Not linked yet</option>{availableInvoices.map(invoice=><option value={invoice.id} key={invoice.id}>{invoice.invoiceNumber||invoice.draftReference} · {money.format(Number(invoice.subtotal))} before VAT</option>)}</select></Field><div className="profit-preview"><span>Customer income <b>{customerInvoiceId?money.format(linkedIncome):"Link an invoice"}</b></span><span>Vendor expense <b>{money.format(expense)}</b></span><strong className={linkedIncome-expense>=0?"positive":"negative"}>Gross profit <b>{customerInvoiceId?money.format(linkedIncome-expense):"—"}</b></strong></div><Field label="Remarks"><textarea name="remarks" rows={2} value={remarks} onChange={event=>{remarksManuallyEdited.current=true;setRemarks(event.target.value)}}/></Field></FormSection><FormButtons label={initial?"Update vendor invoice":"Save vendor invoice"} close={close} disabled={!data.vendors.length||!jobId||!lines.every(line=>line.description)||(!initial?.sourceFilePath&&!document)||documentCompressing}/></form></Modal>;
+  <FormSection title="Customer invoice and profit" note="Search by B/L to quickly link the matching customer invoice"><Field label="Find customer invoice by B/L or number"><input type="search" value={invoiceSearch} onChange={event=>setInvoiceSearch(event.target.value)} placeholder="Type a B/L or invoice number" /></Field><Field label="Customer invoice"><select name="customerInvoice" value={customerInvoiceId} onChange={event=>{const id=event.target.value;setCustomerInvoiceId(id);const invoice=invoices.find(item=>item.id===id);if(invoice)setBlNumber(invoice.hbl||invoice.mbl||blNumber);if(!remarksManuallyEdited.current)setRemarks(defaultVendorBillRemarks(invoice))}}><option value="">Not linked yet</option>{availableInvoices.map(invoice=><option value={invoice.id} key={invoice.id}>{invoice.invoiceNumber||invoice.draftReference}{blLabels(invoice)?` · ${blLabels(invoice)}`:""} · {money.format(Number(invoice.subtotal))} before VAT</option>)}</select></Field><div className="profit-preview"><span>Customer income <b>{customerInvoiceId?money.format(linkedIncome):"Link an invoice"}</b></span><span>Vendor expense <b>{money.format(expense)}</b></span><strong className={linkedIncome-expense>=0?"positive":"negative"}>Gross profit <b>{customerInvoiceId?money.format(linkedIncome-expense):"—"}</b></strong></div><Field label="Remarks"><textarea name="remarks" rows={2} value={remarks} onChange={event=>{remarksManuallyEdited.current=true;setRemarks(event.target.value)}}/></Field></FormSection><FormButtons label={initial?"Update vendor invoice":"Save vendor invoice"} close={close} disabled={!data.vendors.length||!jobId||!lines.every(line=>line.description)||(!initial?.sourceFilePath&&!document)||documentCompressing}/></form></Modal>;
 }
 
 function Masters({

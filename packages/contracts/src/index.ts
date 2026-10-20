@@ -282,6 +282,8 @@ export const jobSummarySchema = z.object({
   status: jobStatusSchema,
   plannedContainerType: z.string(),
   plannedContainerCount: z.number().int().positive(),
+  hbl: z.string().nullable(),
+  mbl: z.string().nullable(),
 });
 
 export const jobDetailSchema = jobSummarySchema.extend({
