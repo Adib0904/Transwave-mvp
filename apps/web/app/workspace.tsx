@@ -77,6 +77,7 @@ type Dialog =
   | "vendorBill"
   | null;
 type AssignedService = JobDetail["services"][number];
+type RefreshScope = "masters" | "jobs" | "invoices" | "vendorBills" | "users";
 type Confirmation = {
   title: string;
   message: string;
@@ -268,6 +269,22 @@ export function Workspace() {
     loadInFlight.current = request;
     return request;
   }, [userId, userRole]);
+
+  async function refreshScopes(scopes: RefreshScope[]) {
+    if (!session || !scopes.length) return;
+    const requests: Promise<void>[] = [];
+    if (scopes.includes("masters")) requests.push(api.masters(session).then(setMasters));
+    if (scopes.includes("jobs")) requests.push(api.jobs(session).then(setJobs));
+    if (scopes.includes("invoices")) requests.push(api.invoices(session).then(setInvoices));
+    if (scopes.includes("vendorBills")) requests.push(api.vendorBills(session).then(setVendorBills));
+    if (scopes.includes("users")) requests.push(api.users(session).then(setUsers));
+    try {
+      await Promise.all(requests);
+    } catch (reason) {
+      setError(message(reason));
+    }
+  }
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -393,7 +410,7 @@ export function Workspace() {
   async function act<T>(
     work: () => Promise<T>,
     after?: (value: T) => void,
-    refreshWorkspace = true,
+    scopes: RefreshScope[] = [],
   ): Promise<boolean> {
     setBusy(true);
     setError("");
@@ -401,8 +418,8 @@ export function Workspace() {
       const value = await work();
       after?.(value);
       setDialog(null);
-      if (refreshWorkspace) await load();
-      else setBusy(false);
+      if (scopes.length) await refreshScopes(scopes);
+      setBusy(false);
       return true;
     } catch (reason) {
       setError(message(reason));
@@ -414,13 +431,13 @@ export function Workspace() {
     options: Omit<Confirmation, "run" | "cancel">,
     work: () => Promise<T>,
     after?: (value: T) => void,
-    refreshWorkspace = true,
+    scopes: RefreshScope[] = [],
   ): Promise<boolean> {
     return new Promise((resolve) => {
       setConfirmation({
         ...options,
         run: async () => {
-          const success = await act(work, after, refreshWorkspace);
+          const success = await act(work, after, scopes);
           setConfirmation(null);
           resolve(success);
         },
@@ -677,7 +694,7 @@ export function Workspace() {
               void confirmAction({ title: "Delete charge?", message: "This job charge will be permanently deleted.", confirmLabel: "Delete charge", danger: true },
                 () => api.removeCharge(session, selectedJob!.id, id),
                 setSelectedJob,
-                false,
+                selectedJob!.charges.some((charge) => charge.id === id && charge.invoiceStatus === "DRAFT") ? ["invoices"] : [],
               )
             }
             onInvoice={() => setDialog("invoice")}
@@ -697,6 +714,7 @@ export function Workspace() {
                   setSelectedJob(value);
                   router.push(`/jobs/${encodeURIComponent(value.id)}`);
                 },
+                ["jobs"],
               )
             }
           />
@@ -723,7 +741,7 @@ export function Workspace() {
             }, (value) => {
               setSelectedVendorBill(value);
               router.push(`/costs/${encodeURIComponent(value.id)}`);
-            })}
+            }, ["vendorBills"])}
           />
         )}
         {page === "Invoices" && (
@@ -738,6 +756,7 @@ export function Workspace() {
               const success = await act(
                 () => api.markInvoicePaid(session, selectedInvoice.id, paymentDate),
                 setSelectedInvoice,
+                ["invoices"],
               );
               if (success) setToast(`${selectedInvoice.invoiceNumber || selectedInvoice.draftReference} marked as paid`);
               return success;
@@ -790,6 +809,7 @@ export function Workspace() {
                   setSelectedJob(value);
                   router.push(`/jobs/${encodeURIComponent(value.id)}`);
                 },
+                ["jobs"],
               )
             }
             onIssue={() =>
@@ -797,6 +817,7 @@ export function Workspace() {
               void act(
                 () => api.issueInvoice(session, selectedInvoice.id),
                 setSelectedInvoice,
+                ["invoices"],
               )
             }
             detailOnly={false}
@@ -812,7 +833,7 @@ export function Workspace() {
             onOpen={openVendorBill}
             detailOnly={false}
             onEdit={() => setDialog("vendorBill")}
-            onDelete={() => selectedVendorBill && void confirmAction({ title: "Delete vendor invoice?", message: `${selectedVendorBill.vendorInvoiceNumber} and its uploaded document will be permanently deleted.`, confirmLabel: "Delete invoice", danger: true }, () => api.removeVendorBill(session, selectedVendorBill), () => setSelectedVendorBill(null))}
+            onDelete={() => selectedVendorBill && void confirmAction({ title: "Delete vendor invoice?", message: `${selectedVendorBill.vendorInvoiceNumber} and its uploaded document will be permanently deleted.`, confirmLabel: "Delete invoice", danger: true }, () => api.removeVendorBill(session, selectedVendorBill), () => setSelectedVendorBill(null), ["vendorBills"])}
             onVendor={(vendor) => { setEditingVendor(vendor); setDialog("vendor"); }}
             onOpenInvoice={openInvoice}
             onOpenDocument={(path) => void openVendorDocument(path)}
@@ -833,6 +854,8 @@ export function Workspace() {
             onTogglePort={(value) =>
               void act(() =>
                 api.updatePort(session, value.id, { active: !value.active }),
+                undefined,
+                ["masters"],
               )
             }
             onNewService={() => {
@@ -846,11 +869,13 @@ export function Workspace() {
             onToggleService={(value) =>
               void act(() =>
                 api.updateService(session, value.id, { active: !value.active }),
+                undefined,
+                ["masters"],
               )
             }
             onNewBranch={() => { setEditingBranch(null); setDialog("branch"); }}
             onEditBranch={(value) => { setEditingBranch(value); setDialog("branch"); }}
-            onToggleBranch={(value) => void act(() => api.updateBranch(session, value.id, { active: !value.active }))}
+            onToggleBranch={(value) => void act(() => api.updateBranch(session, value.id, { active: !value.active }), undefined, ["masters"])}
             onNewTaxRate={() => { setEditingTaxRate(null); setDialog("taxRate"); }}
             onEditTaxRate={(value) => { setEditingTaxRate(value); setDialog("taxRate"); }}
           />
@@ -871,6 +896,8 @@ export function Workspace() {
             onToggle={(value) =>
               void act(() =>
                 api.updateUser(session, value.id, { active: !value.active }),
+                undefined,
+                ["users"],
               )
             }
           />
@@ -887,8 +914,8 @@ export function Workspace() {
             close={() => setDialog(null)}
             save={(input) =>
               void (editingCustomer
-                ? confirmAction({ title: "Save customer changes?", message: `Update the saved details for ${editingCustomer.name}?`, confirmLabel: "Save changes" }, () => api.updateCustomer(session, editingCustomer.id, input))
-                : act(() => api.createCustomer(session, input)))
+                ? confirmAction({ title: "Save customer changes?", message: `Update the saved details for ${editingCustomer.name}?`, confirmLabel: "Save changes" }, () => api.updateCustomer(session, editingCustomer.id, input), undefined, ["masters"])
+                : act(() => api.createCustomer(session, input), undefined, ["masters"]))
             }
           />
         </EditorSurface>
@@ -907,6 +934,7 @@ export function Workspace() {
                   setSelectedJob(value);
                   router.push(`/jobs/${encodeURIComponent(value.id)}`);
                 },
+                ["jobs"],
               )
             }
           />
@@ -919,6 +947,7 @@ export function Workspace() {
             void act(
               () => api.addContainer(session, selectedJob.id, input),
               setSelectedJob,
+              [],
             )
           }
         />
@@ -932,8 +961,8 @@ export function Workspace() {
             close={() => setDialog(null)}
             save={(input) =>
               chargeService.charge
-                ? confirmAction({ title: "Update charge?", message: `Save the revised ${chargeService.service.name} charge?`, confirmLabel: "Update charge" }, () => api.saveCharge(session, selectedJob.id, input), setSelectedJob, false)
-                : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob, false)
+                ? confirmAction({ title: "Update charge?", message: `Save the revised ${chargeService.service.name} charge?`, confirmLabel: "Update charge" }, () => api.saveCharge(session, selectedJob.id, input), setSelectedJob, chargeService.charge.invoiceStatus === "DRAFT" ? ["invoices"] : [])
+                : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob, [])
             }
           />
         </EditorSurface>
@@ -953,6 +982,7 @@ export function Workspace() {
                 setSelectedInvoice(value);
                 router.push(`/invoices/${encodeURIComponent(value.id)}`);
               },
+              ["invoices"],
             )
           }
         />
@@ -973,6 +1003,7 @@ export function Workspace() {
                 },
                 () => api.updateInvoice(session, selectedInvoice.id, input),
                 setSelectedInvoice,
+                ["invoices"],
               )
             }
           />
@@ -985,8 +1016,8 @@ export function Workspace() {
             close={() => setDialog(null)}
             save={(input) =>
               void (editingPort
-                ? confirmAction({ title: "Save port changes?", message: `Update ${editingPort.name}?`, confirmLabel: "Save changes" }, () => api.updatePort(session, editingPort.id, input))
-                : act(() => api.createPort(session, input)))
+                ? confirmAction({ title: "Save port changes?", message: `Update ${editingPort.name}?`, confirmLabel: "Save changes" }, () => api.updatePort(session, editingPort.id, input), undefined, ["masters"])
+                : act(() => api.createPort(session, input), undefined, ["masters"]))
             }
           />
         </EditorSurface>
@@ -999,8 +1030,8 @@ export function Workspace() {
             close={() => setDialog(null)}
             save={(input) =>
               void (editingService
-                ? confirmAction({ title: "Save service changes?", message: `Update ${editingService.name}?`, confirmLabel: "Save changes" }, () => api.updateService(session, editingService.id, input))
-                : act(() => api.createService(session, input)))
+                ? confirmAction({ title: "Save service changes?", message: `Update ${editingService.name}?`, confirmLabel: "Save changes" }, () => api.updateService(session, editingService.id, input), undefined, ["masters"])
+                : act(() => api.createService(session, input), undefined, ["masters"]))
             }
           />
         </EditorSurface>
@@ -1011,8 +1042,8 @@ export function Workspace() {
             initial={editingBranch}
             close={() => setDialog(null)}
             save={(input) => void (editingBranch
-              ? confirmAction({ title: "Save branch changes?", message: `Update ${editingBranch.name}?`, confirmLabel: "Save changes" }, () => api.updateBranch(session, editingBranch.id, input))
-              : act(() => api.createBranch(session, input)))}
+              ? confirmAction({ title: "Save branch changes?", message: `Update ${editingBranch.name}?`, confirmLabel: "Save changes" }, () => api.updateBranch(session, editingBranch.id, input), undefined, ["masters"])
+              : act(() => api.createBranch(session, input), undefined, ["masters"]))}
           />
         </EditorSurface>
       )}
@@ -1022,8 +1053,8 @@ export function Workspace() {
             initial={editingTaxRate}
             close={() => setDialog(null)}
             save={(input) => void (editingTaxRate
-              ? confirmAction({ title: "Save tax rate changes?", message: `Update ${editingTaxRate.code}? Existing invoice snapshots will not change.`, confirmLabel: "Save changes" }, () => api.updateTaxRate(session, editingTaxRate.id, input))
-              : act(() => api.createTaxRate(session, input)))}
+              ? confirmAction({ title: "Save tax rate changes?", message: `Update ${editingTaxRate.code}? Existing invoice snapshots will not change.`, confirmLabel: "Save changes" }, () => api.updateTaxRate(session, editingTaxRate.id, input), undefined, ["masters"])
+              : act(() => api.createTaxRate(session, input), undefined, ["masters"]))}
           />
         </EditorSurface>
       )}
@@ -1039,8 +1070,8 @@ export function Workspace() {
                       session,
                       editingUser.id,
                       input as UpdateManagedUser,
-                    ))
-                : act(() => api.createUser(session, input as CreateManagedUser)))
+                    ), undefined, ["users"])
+                : act(() => api.createUser(session, input as CreateManagedUser), undefined, ["users"]))
             }
           />
         </EditorSurface>
@@ -1050,7 +1081,7 @@ export function Workspace() {
           <VendorDialog
             initial={editingVendor}
             close={() => setDialog(null)}
-            save={(input) => void (editingVendor ? confirmAction({ title: "Save vendor changes?", message: `Update ${editingVendor.name}?`, confirmLabel: "Save changes" }, () => api.updateVendor(session, editingVendor.id, input)) : act(() => api.createVendor(session, input)))}
+            save={(input) => void (editingVendor ? confirmAction({ title: "Save vendor changes?", message: `Update ${editingVendor.name}?`, confirmLabel: "Save changes" }, () => api.updateVendor(session, editingVendor.id, input), undefined, ["masters", "vendorBills"]) : act(() => api.createVendor(session, input), undefined, ["masters"]))}
           />
         </EditorSurface>
       )}
@@ -1074,7 +1105,7 @@ export function Workspace() {
                 if (!selectedVendorBill) await api.removeVendorBill(session, saved);
                 throw reason;
               }
-            }, setSelectedVendorBill)}
+            }, setSelectedVendorBill, ["vendorBills"])}
           />
         </EditorSurface>
       )}
