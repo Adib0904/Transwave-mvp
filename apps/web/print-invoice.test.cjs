@@ -21,5 +21,5 @@ assert.equal(second.env.document.title, 'TransWave'); assert.equal(second.listen
 const failure = fixture(); failure.env.print = () => { throw new Error('print failed'); };
 assert.throws(() => exportsObject.printInvoice('INV/2026/000145', failure.env));
 assert.equal(failure.env.document.title, 'TransWave'); assert.equal(failure.listeners.size, 0);
-assert.equal(exportsObject.invoicePrintTitle({ vessel: 'OSHAIRIJ', plannedContainerCount: 42, plannedContainerType: '20SD', invoiceDate: '2026-09-12', issuedAt: null, invoiceNumber: 'INV/2' }), 'OSHAIRIJ 42X20FT INVOICE 2026-09-12');
+assert.equal(exportsObject.invoicePrintTitle({ hbl: 'EMIVOMESLM003021', mbl: 'MASTER12345', invoiceNumber: 'INV/TSW/2026/00133' }), 'INV-00133-BL03021');
 console.log('PASS: print called once, sanitized title, afterprint/fallback/error cleanup and idempotent restore');

@@ -211,7 +211,7 @@ export class JobsService {
       database
         .from("shipments")
         .select(
-          "job_id, port_of_loading_id, port_of_discharge_id, transshipment_port_id",
+          "job_id, port_of_loading_id, port_of_discharge_id, transshipment_port_id, hbl, mbl",
         )
         .in("job_id", jobIds),
       database.from("job_charges").select("id, job_id").in("job_id", jobIds),
@@ -510,6 +510,8 @@ export class JobsService {
         port_of_loading_id: string;
         port_of_discharge_id: string;
         transshipment_port_id: string | null;
+        hbl: string | null;
+        mbl: string | null;
       }
     >,
     portsById: Map<string, string>,
@@ -532,6 +534,8 @@ export class JobsService {
       status: job.status,
       plannedContainerType: job.planned_container_type,
       plannedContainerCount: job.planned_container_count,
+      hbl: shipment?.hbl ?? null,
+      mbl: shipment?.mbl ?? null,
     };
   }
 
