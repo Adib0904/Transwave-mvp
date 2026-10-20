@@ -1,6 +1,7 @@
 import { createClient, type Session } from "@supabase/supabase-js";
 import type {
   CreateCharge,
+  AuditLogPage,
   CreateManagedUser,
   Customer,
   Invoice,
@@ -122,6 +123,13 @@ export const api = {
     }
   },
   users: (s: Session) => call<ManagedUser[]>(s, "/users"),
+  auditLogs: (s: Session, filters: { page: number; pageSize: number; action?: string; entityType?: string; actorUserId?: string; fromDate?: string; toDate?: string; search?: string }) => {
+    const params = new URLSearchParams({ page: String(filters.page), pageSize: String(filters.pageSize) });
+    for (const [key, value] of Object.entries(filters)) {
+      if (key !== "page" && key !== "pageSize" && value) params.set(key, String(value));
+    }
+    return call<AuditLogPage>(s, `/audit-logs?${params.toString()}`);
+  },
   createUser: (s: Session, value: CreateManagedUser) => call<ManagedUser>(s, "/users", { method: "POST", body: JSON.stringify(value) }),
   updateUser: (s: Session, id: string, value: UpdateManagedUser) => call<ManagedUser>(s, `/users/${id}`, { method: "PATCH", body: JSON.stringify(value) })
 };

@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import type { UserContext } from "@transwave/contracts";
 import { api, supabase } from "./api";
@@ -12,6 +12,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   useEffect(() => {
     let active = true;
@@ -21,10 +23,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!session) { setUser(null); setLoading(false); return; }
+    const activeSession = sessionRef.current;
+    if (!activeSession) { setUser(null); setLoading(false); return; }
     setLoading(true); setError("");
-    api.me(session).then(setUser).catch(reason => { setError(reason instanceof Error ? reason.message : "Unable to load account"); setUser(null); }).finally(() => setLoading(false));
-  }, [session]);
+    let active = true;
+    api.me(activeSession).then(value => { if (active) setUser(value); }).catch(reason => { if (active) { setError(reason instanceof Error ? reason.message : "Unable to load account"); setUser(null); } }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [session?.user.id]);
 
   const value = useMemo<AuthValue>(() => ({ session, user, loading, error,
     async signIn(email, password) { setLoading(true); setError(""); const result = await supabase.auth.signInWithPassword({ email, password }); if (result.error) { setLoading(false); throw result.error; } },

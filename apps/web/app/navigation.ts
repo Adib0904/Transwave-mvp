@@ -5,7 +5,8 @@ export type NavigationPage =
   | "Invoices"
   | "Costs"
   | "Masters"
-  | "Users";
+  | "Users"
+  | "Activity";
 
 export type Page = NavigationPage | "New Job" | "New Vendor Invoice";
 
@@ -17,6 +18,7 @@ export const navigationPaths: Record<Page, string> = {
   Costs: "/costs",
   Masters: "/masters",
   Users: "/users",
+  Activity: "/activity",
   "New Job": "/jobs/new",
   "New Vendor Invoice": "/costs/new",
 };

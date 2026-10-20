@@ -52,6 +52,22 @@ export const managedUserSchema = z.object({
   lastSignInAt: z.string().datetime().nullable(),
 });
 
+export const auditLogSchema = z.object({
+  id: z.number(),
+  actorUserId: uuidSchema,
+  action: z.string(),
+  entityType: z.string(),
+  entityId: uuidSchema,
+  details: z.record(z.string(), z.unknown()),
+  createdAt: z.string().datetime(),
+});
+export const auditLogPageSchema = z.object({
+  items: z.array(auditLogSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+});
+
 export const createManagedUserSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   name: z.string().trim().min(2).max(120),
@@ -703,6 +719,8 @@ export const apiErrorSchema = z.object({
 export type Service = z.infer<typeof serviceSchema>;
 export type UserContext = z.infer<typeof userContextSchema>;
 export type ManagedUser = z.infer<typeof managedUserSchema>;
+export type AuditLog = z.infer<typeof auditLogSchema>;
+export type AuditLogPage = z.infer<typeof auditLogPageSchema>;
 export type CreateManagedUser = z.infer<typeof createManagedUserSchema>;
 export type UpdateManagedUser = z.infer<typeof updateManagedUserSchema>;
 export type Customer = z.infer<typeof customerSchema>;
