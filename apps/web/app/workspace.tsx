@@ -417,8 +417,9 @@ export function Workspace() {
       setConfirmation({
         ...options,
         run: async () => {
+          const success = await act(work, after);
           setConfirmation(null);
-          resolve(await act(work, after));
+          resolve(success);
         },
         cancel: () => {
           setConfirmation(null);
@@ -926,9 +927,9 @@ export function Workspace() {
             currencies={masters.currencies}
             close={() => setDialog(null)}
             save={(input) =>
-              void (chargeService.charge
+              chargeService.charge
                 ? confirmAction({ title: "Update charge?", message: `Save the revised ${chargeService.service.name} charge?`, confirmLabel: "Update charge" }, () => api.saveCharge(session, selectedJob.id, input), setSelectedJob)
-                : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob))
+                : act(() => api.saveCharge(session, selectedJob.id, input), setSelectedJob)
             }
           />
         </EditorSurface>
@@ -942,7 +943,7 @@ export function Workspace() {
             .map((service) => service.id)}
           close={() => setDialog(null)}
           save={(ids) =>
-            void act(
+            act(
               () => api.createDraft(session, selectedJob.id, ids),
               (value) => {
                 setSelectedInvoice(value);
@@ -2663,6 +2664,7 @@ function JobEditor({
   save(v: SaveJob): Promise<boolean>;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [serviceIds, setServiceIds] = useState(
     initial?.services.map((s) => s.id) ?? [],
   );
@@ -2724,6 +2726,7 @@ function JobEditor({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     const d = new FormData(event.currentTarget);
     const containerManifest = String(d.get("containerNumbers") || "");
     const containerNumbers = parseContainerManifest(containerManifest);
@@ -2737,6 +2740,7 @@ function JobEditor({
       input?.reportValidity();
       return;
     }
+    setSubmitting(true);
     void save({
       customerId: String(d.get("customerId")),
       branchId: String(d.get("branchId")),
@@ -2774,6 +2778,9 @@ function JobEditor({
       serviceIds,
     }).then((success) => {
       if (success && !initial) clearJobFormDraft(draftOwner);
+      if (!success) setSubmitting(false);
+    }).catch(() => {
+      setSubmitting(false);
     });
   }
   const form = (
@@ -3140,6 +3147,8 @@ function JobEditor({
         label={initial ? "Update job" : "Create job"}
         close={close}
         disabled={!serviceIds.length}
+        loading={submitting}
+        loadingLabel={initial ? "Saving job…" : "Creating job…"}
       />
     </form>
   );
@@ -3246,8 +3255,9 @@ function ChargeDialog({
     exchangeRate: string;
     unitRate: string;
     taxRateId: string;
-  }): void;
+  }): Promise<boolean>;
 }) {
+  const [submitting, setSubmitting] = useState(false);
   const supportedCurrencies = currencies.filter(
     (value): value is ChargeCurrency => value === "AED" || value === "USD",
   );
@@ -3293,8 +3303,10 @@ function ChargeDialog({
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          if (submitting) return;
           const d = new FormData(event.currentTarget);
-          save({
+          setSubmitting(true);
+          void save({
             jobServiceId: item.service.jobServiceId,
             description: String(d.get("description")),
             quantity,
@@ -3303,6 +3315,8 @@ function ChargeDialog({
             exchangeRate: currency === "AED" ? "1" : exchangeRate,
             unitRate,
             taxRateId: taxId,
+          }).then((success) => {
+            if (!success) setSubmitting(false);
           });
         }}
       >
@@ -3430,6 +3444,8 @@ function ChargeDialog({
         <FormButtons
           label={item.charge ? "Update charge" : "Save charge"}
           close={close}
+          loading={submitting}
+          loadingLabel={item.charge ? "Updating charge…" : "Saving charge…"}
         />
       </form>
     </Modal>
@@ -3447,9 +3463,10 @@ function InvoiceDialog({
   containerCount: number;
   oceanServiceIds: string[];
   close(): void;
-  save(ids: string[]): void;
+  save(ids: string[]): Promise<boolean>;
 }) {
   const [ids, setIds] = useState(charges.map((c) => c.id));
+  const [submitting, setSubmitting] = useState(false);
   const total = charges
     .filter((c) => ids.includes(c.id))
     .reduce((sum, c) => {
@@ -3462,7 +3479,11 @@ function InvoiceDialog({
         className="invoice-draft-form"
         onSubmit={(event) => {
           event.preventDefault();
-          save(ids);
+          if (submitting) return;
+          setSubmitting(true);
+          void save(ids).then((success) => {
+            if (!success) setSubmitting(false);
+          });
         }}
       >
         <p className="muted">
@@ -3500,11 +3521,12 @@ function InvoiceDialog({
           <b>{money.format(total)}</b>
         </div>
         <div className="form-actions">
-          <button type="button" className="soft" onClick={close}>
+          <button type="button" className="soft" onClick={close} disabled={submitting}>
             Cancel
           </button>
-          <button type="submit" className="button" disabled={!ids.length}>
-            Create draft
+          <button type="submit" className="button" disabled={!ids.length || submitting}>
+            {submitting && <span className="button-spinner" aria-hidden="true" />}
+            {submitting ? "Creating invoice…" : "Create draft"}
           </button>
         </div>
       </form>
@@ -4545,6 +4567,7 @@ function ConfirmationDialog({
   run,
   cancel,
 }: Confirmation) {
+  const [running, setRunning] = useState(false);
   return (
     <div className="overlay confirmation-overlay">
       <section
@@ -4560,9 +4583,13 @@ function ConfirmationDialog({
         <h2 id="confirmation-title">{title}</h2>
         <p id="confirmation-description">{description}</p>
         <div className="confirmation-actions">
-          <button className="soft" onClick={cancel}>Cancel</button>
-          <button className={danger ? "button danger-button" : "button"} onClick={() => void run()}>
-            {confirmLabel}
+          <button className="soft" onClick={cancel} disabled={running}>Cancel</button>
+          <button className={danger ? "button danger-button" : "button"} disabled={running} onClick={() => {
+            setRunning(true);
+            void run();
+          }}>
+            {running && <span className="button-spinner" aria-hidden="true" />}
+            {running ? "Saving…" : confirmLabel}
           </button>
         </div>
       </section>
@@ -4643,18 +4670,23 @@ function FormButtons({
   label: heading,
   close,
   disabled,
+  loading = false,
+  loadingLabel,
 }: {
   label: string;
   close(): void;
   disabled?: boolean;
+  loading?: boolean;
+  loadingLabel?: string;
 }) {
   return (
     <div className="form-actions">
-      <button className="soft" type="button" onClick={close}>
+      <button className="soft" type="button" onClick={close} disabled={loading}>
         Cancel
       </button>
-      <button className="button" disabled={disabled}>
-        {heading}
+      <button className="button" disabled={disabled || loading}>
+        {loading && <span className="button-spinner" aria-hidden="true" />}
+        {loading ? loadingLabel || "Saving…" : heading}
       </button>
     </div>
   );
