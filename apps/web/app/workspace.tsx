@@ -550,7 +550,6 @@ export function Workspace() {
       <section className="workspace" hidden={editorPage === page}>
         <header>
           <div>
-            <p className="kicker">{user.companyName}</p>
             <h1>{page === "New Job" ? "Create job" : page === "New Vendor Invoice" ? "Record vendor invoice" : record ? ` ${page.slice(0, -1)} details` : page}</h1>
           </div>
           <div className="header-actions">
@@ -729,6 +728,15 @@ export function Workspace() {
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
             onEdit={() => setDialog("invoiceEdit")}
+            onMarkPaid={async (paymentDate) => {
+              if (!selectedInvoice) return false;
+              const success = await act(
+                () => api.markInvoicePaid(session, selectedInvoice.id, paymentDate),
+                setSelectedInvoice,
+              );
+              if (success) setToast(`${selectedInvoice.invoiceNumber || selectedInvoice.draftReference} marked as paid`);
+              return success;
+            }}
             onOpen={openInvoice}
             onCreateSimilar={() =>
               selectedInvoice &&
@@ -1642,6 +1650,7 @@ function Invoices({
   onOpen,
   onCreateSimilar,
   onEdit,
+  onMarkPaid,
   onIssue,
   detailOnly,
 }: {
@@ -1652,11 +1661,15 @@ function Invoices({
   onOpen(id: string): void;
   onCreateSimilar(): void;
   onEdit(): void;
+  onMarkPaid(paymentDate: string): Promise<boolean>;
   onIssue(): void;
   detailOnly: boolean;
 }) {
   const [filters, setFilters] = useState<InvoiceFilters>(emptyInvoiceFilters);
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentDate, setPaymentDate] = useState("");
+  const [savingPayment, setSavingPayment] = useState(false);
   const [wideLayout, setWideLayout] = useState(false);
   const autoSelectedFirst = useRef(false);
   const filteredInvoices = filterInvoices(invoices, filters);
@@ -1931,6 +1944,18 @@ function Invoices({
             </strong>
           </div>
           <div className="form-actions">
+            {canIssue && selected.status === "ISSUED" && selected.paymentStatus === "UNPAID" && (
+              <button
+                className="button"
+                type="button"
+                onClick={() => {
+                  setPaymentDate(new Date().toISOString().slice(0, 10));
+                  setPaymentDialogOpen(true);
+                }}
+              >
+                Mark as paid
+              </button>
+            )}
             {canCreateSimilar && (
               <button className="soft" onClick={onCreateSimilar}>
                 Create similar job
@@ -1954,6 +1979,53 @@ function Invoices({
             )}
           </div>
           <PersistedPrint invoice={selected} />
+          {paymentDialogOpen && (
+            <Modal
+              title="Mark invoice as paid"
+              className="payment-modal"
+              close={() => !savingPayment && setPaymentDialogOpen(false)}
+            >
+              <div className="payment-dialog-content">
+                <p className="form-help">
+                  Record the payment date for {selected.invoiceNumber || selected.draftReference}.
+                </p>
+                <Field label="Payment date">
+                  <input
+                    type="date"
+                    required
+                    value={paymentDate}
+                    onChange={(event) => setPaymentDate(event.target.value)}
+                  />
+                </Field>
+                <div className="form-actions">
+                  <button
+                    className="soft"
+                    type="button"
+                    disabled={savingPayment}
+                    onClick={() => setPaymentDialogOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={!paymentDate || savingPayment}
+                    onClick={async () => {
+                      setSavingPayment(true);
+                      try {
+                        const success = await onMarkPaid(paymentDate);
+                        if (success) setPaymentDialogOpen(false);
+                      } finally {
+                        setSavingPayment(false);
+                      }
+                    }}
+                  >
+                    {savingPayment ? "Updating…" : "Confirm payment"}
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          )}
         </section>
       ) : (
         <Panel title="Select an invoice" sub="View a draft or issued invoice">
@@ -3482,8 +3554,6 @@ function InvoiceEditDialog({
   const [customerAddress, setCustomerAddress] = useState(
     invoice.customerAddress || "",
   );
-  const [paymentStatus, setPaymentStatus] = useState(invoice.paymentStatus);
-  const [paymentDate, setPaymentDate] = useState(invoice.paymentDate || "");
   const [containers, setContainers] = useState(invoice.containers);
   const selectCustomer = (id: string) => {
     setCustomerId(id);
@@ -3537,7 +3607,7 @@ function InvoiceEditDialog({
           save({
             invoiceDate: String(data.get("invoiceDate")),
             dueDate: nullable(data, "dueDate"),
-            paymentDate: paymentStatus === "PAID" ? paymentDate : null,
+            paymentDate: invoice.paymentDate,
             customerName,
             customerTrn: customerTrn.trim() || null,
             customerVatNumber: customerVatNumber.trim() || null,
@@ -3575,9 +3645,9 @@ function InvoiceEditDialog({
         }}
       >
         <p className="form-help">
-          The invoice number and {invoice.status.toLowerCase()} status remain unchanged. Every revision is audit logged.
+          The invoice number, payment status, and payment date are managed separately. Invoice revisions are audit logged.
         </p>
-        <div className="three">
+        <div className="two">
           <Field label="Invoice date">
             <input
               name="invoiceDate"
@@ -3589,35 +3659,7 @@ function InvoiceEditDialog({
           <Field label="Due date">
             <input name="dueDate" type="date" defaultValue={invoice.dueDate || ""} />
           </Field>
-          <Field label="Payment status">
-            <select
-              value={paymentStatus}
-              disabled={invoice.status !== "ISSUED"}
-              onChange={(event) => {
-                const status = event.target.value as Invoice["paymentStatus"];
-                setPaymentStatus(status);
-                setPaymentDate(
-                  status === "PAID"
-                    ? paymentDate || new Date().toISOString().slice(0, 10)
-                    : "",
-                );
-              }}
-            >
-              <option value="UNPAID">UNPAID</option>
-              <option value="PAID">PAID</option>
-            </select>
-          </Field>
         </div>
-        {paymentStatus === "PAID" && (
-          <Field label="Payment date">
-            <input
-              type="date"
-              required
-              value={paymentDate}
-              onChange={(event) => setPaymentDate(event.target.value)}
-            />
-          </Field>
-        )}
         <Field label="Select billing customer">
           <select value={customerId} onChange={(event) => selectCustomer(event.target.value)}>
             <option value="">Use custom invoice details</option>
@@ -4464,11 +4506,13 @@ function EditorSurface({
 function Modal({
   title,
   wide,
+  className,
   close,
   children,
 }: {
   title: string;
   wide?: boolean;
+  className?: string;
   close(): void;
   children: React.ReactNode;
 }) {
@@ -4476,13 +4520,12 @@ function Modal({
   return (
     <div className={inline ? "page-form" : "overlay"}>
       <section
-        className={`modal ${wide ? "wide-modal" : ""}`}
+        className={`modal ${wide ? "wide-modal" : ""} ${className || ""}`}
         role={inline ? undefined : "dialog"}
         aria-modal={inline ? undefined : true}
       >
         <div className="panel-head">
           <div>
-            <p className="kicker">TRANSWAVE OPERATIONS</p>
             <h2>{title}</h2>
           </div>
           <button className="x" aria-label="Close" onClick={close}>

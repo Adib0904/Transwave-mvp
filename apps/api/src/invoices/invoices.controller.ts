@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import { createDraftSchema, updateInvoiceSchema, type CreateDraft, type UpdateInvoice } from "@transwave/contracts";
+import { createDraftSchema, markInvoicePaidSchema, updateInvoiceSchema, type CreateDraft, type MarkInvoicePaid, type UpdateInvoice } from "@transwave/contracts";
 import type { AuthenticatedRequest } from "../auth/authenticated-request.js";
 import { SupabaseAuthGuard } from "../auth/supabase-auth.guard.js";
 import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
@@ -38,6 +38,16 @@ export class InvoicesController {
   @ApiOperation({ summary: "Issue a draft and atomically allocate its permanent invoice number" })
   issue(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) {
     return this.invoices.issue(request.database, request.auth.userId, id);
+  }
+
+  @Patch(":id/payment")
+  @ApiOperation({ summary: "Mark an issued invoice as paid" })
+  markPaid(
+    @Req() request: AuthenticatedRequest,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(markInvoicePaidSchema)) input: MarkInvoicePaid
+  ) {
+    return this.invoices.markPaid(request.database, request.auth.userId, id, input.paymentDate);
   }
 
   @Patch(":id")

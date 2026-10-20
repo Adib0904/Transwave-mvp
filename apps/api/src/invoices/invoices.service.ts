@@ -106,6 +106,16 @@ export class InvoicesService {
     return this.findOne(database, id);
   }
 
+  async markPaid(database: TransWaveDatabaseClient, userId: string, id: string, paymentDate: string): Promise<Invoice> {
+    await requireTenantRole(database, userId, ["OWNER", "ADMIN", "OPERATIONS", "FINANCE"]);
+    const { error } = await database.rpc("mark_invoice_paid", {
+      p_invoice_id: id,
+      p_payment_date: paymentDate,
+    });
+    if (error) throwDatabaseError(error);
+    return this.findOne(database, id);
+  }
+
   private toInvoice(invoice: InvoiceRow, lines: InvoiceLineRow[]): Invoice {
     const containers = containerSchema.array().safeParse(invoice.containers_snapshot);
     return {
