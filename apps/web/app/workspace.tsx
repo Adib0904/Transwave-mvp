@@ -538,6 +538,10 @@ export function Workspace() {
         {mobileMenuOpen && <>
           <button className="mobile-menu-backdrop" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />
           <nav id="mobile-navigation-menu" className="mobile-navigation-menu" aria-label="Main navigation">
+            <div className="mobile-navigation-head">
+              <h2>Menu</h2>
+              <button type="button" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)}>×</button>
+            </div>
             {pages.map((item) => (
               <button
                 key={item}
