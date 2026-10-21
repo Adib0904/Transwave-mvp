@@ -193,6 +193,7 @@ export function Workspace() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingPort, setEditingPort] = useState<Port | null>(null);
   const [editingService, setEditingService] = useState<
@@ -469,6 +470,7 @@ export function Workspace() {
     goTo(next);
     if (!editorPage) setDialog(null);
     setProfileOpen(false);
+    setMobileMenuOpen(false);
     setError("");
   };
   const openNewJob = () => {
@@ -518,9 +520,35 @@ export function Workspace() {
   return (
     <main className="app-shell" onInputCapture={uppercaseApplicationInput}>
       <div className="mobile-app-bar">
-        <span className="mobile-brand-slot">
-          <img className="mobile-brand-logo" src="/images/tsw-logo.png" alt="TransWave Shipping and Logistics" />
-        </span>
+        <div className="mobile-app-bar-brand">
+          <button
+            type="button"
+            className="mobile-menu-trigger"
+            aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-navigation-menu"
+            onClick={() => { setProfileOpen(false); setMobileMenuOpen((open) => !open); }}
+          >
+            <span aria-hidden="true"><i /><i /><i /></span>
+          </button>
+          <span className="mobile-brand-slot">
+            <img className="mobile-brand-logo" src="/images/tsw-logo.png" alt="TransWave Shipping and Logistics" />
+          </span>
+        </div>
+        {mobileMenuOpen && <>
+          <button className="mobile-menu-backdrop" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />
+          <nav id="mobile-navigation-menu" className="mobile-navigation-menu" aria-label="Main navigation">
+            {pages.map((item) => (
+              <button
+                key={item}
+                type="button"
+                aria-current={page === item || (page === "New Job" && item === "Jobs") || (page === "New Vendor Invoice" && item === "Costs") ? "page" : undefined}
+                className={page === item || (page === "New Job" && item === "Jobs") || (page === "New Vendor Invoice" && item === "Costs") ? "menu active" : "menu"}
+                onClick={() => nav(item)}
+              ><span>{icons[item]}</span>{item}</button>
+            ))}
+          </nav>
+        </>}
         <div className="mobile-profile-area">
           {profileOpen && (
             <>
@@ -535,7 +563,7 @@ export function Workspace() {
             </div>
             </>
           )}
-          <button className="profile-trigger mobile-profile-trigger" aria-expanded={profileOpen} aria-label="Open profile" onClick={() => setProfileOpen((open) => !open)}>
+          <button className="profile-trigger mobile-profile-trigger" aria-expanded={profileOpen} aria-label="Open profile" onClick={() => { setMobileMenuOpen(false); setProfileOpen((open) => !open); }}>
             <i>{profileInitials}</i>
             <span><b>{profileName}</b><small>{label(user.role)}</small></span>
             <em>⌄</em>
