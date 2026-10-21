@@ -1010,6 +1010,7 @@ export function Workspace() {
         <EditorSurface inline={Boolean(chargeService.charge)} visible={page === "Jobs"}>
           <ChargeDialog
             item={chargeService}
+            plannedContainerCount={selectedJob.plannedContainerCount}
             taxes={masters.taxRates}
             currencies={masters.currencies}
             close={() => setDialog(null)}
@@ -3337,12 +3338,14 @@ function ContainerDialog({
 
 function ChargeDialog({
   item,
+  plannedContainerCount,
   taxes,
   currencies,
   close,
   save,
 }: {
   item: { service: AssignedService; charge?: Charge };
+  plannedContainerCount: number;
   taxes: MasterData["taxRates"];
   currencies: string[];
   close(): void;
@@ -3364,7 +3367,10 @@ function ChargeDialog({
   const [currency, setCurrency] = useState<ChargeCurrency>(
     (item.charge?.currency ?? "USD") as ChargeCurrency,
   );
-  const [quantity, setQuantity] = useState(item.charge?.quantity || "1");
+  const isOceanFreight = item.service.code.toUpperCase() === "OCEAN" || item.service.name.toLowerCase() === "ocean freight";
+  const [quantity, setQuantity] = useState(
+    isOceanFreight ? String(plannedContainerCount) : item.charge?.quantity || "1",
+  );
   const [unitRate, setUnitRate] = useState(item.charge?.unitRate || "");
   const [exchangeRate, setExchangeRate] = useState(
     item.charge
@@ -3447,8 +3453,8 @@ function ChargeDialog({
               name="uom"
               required
               list="charge-units"
-              readOnly={item.service.code.toUpperCase() === "OCEAN"}
-              defaultValue={item.service.code.toUpperCase() === "OCEAN" ? "CNT" : item.charge?.uom || item.service.defaultUom}
+              readOnly={isOceanFreight}
+              defaultValue={isOceanFreight ? "CNT" : item.charge?.uom || item.service.defaultUom}
             />
             <datalist id="charge-units">
               <option value="CNT" />
