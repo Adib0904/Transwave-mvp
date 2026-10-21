@@ -31,6 +31,11 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 if (!supabaseUrl || !supabaseKey) throw new Error("Supabase browser environment is not configured");
 
 export const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: true, autoRefreshToken: true } });
+
+function safeInvoiceFileName(fileName: string) {
+  const baseName = fileName.replace(/\.pdf$/i, "").replace(/[^a-z\d]/gi, "");
+  return `${baseName || "invoice"}.pdf`;
+}
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001/api/v1";
 
 export class ApiError extends Error {
@@ -105,7 +110,7 @@ export const api = {
     try {
       return await call<VendorBill>(s, `/vendor-bills/${billId}/document`, {
         method: "PATCH",
-        body: JSON.stringify({ storagePath, fileName: file.name }),
+        body: JSON.stringify({ storagePath, fileName: safeInvoiceFileName(file.name) }),
       });
     } catch (reason) {
       await supabase.storage.from("invoice-documents").remove([storagePath]);
