@@ -773,6 +773,7 @@ export function Workspace() {
             data={masters}
             jobs={jobs}
             invoices={invoices}
+            bills={vendorBills}
             draftOwner={user.userId}
             close={closeVendorInvoicePage}
             save={(input, file) => act(async () => {
@@ -2230,7 +2231,7 @@ function defaultVendorBillRemarks(invoice?: Invoice | null) {
 
 function VendorDialog({initial,close,save}:{initial:Vendor|null;close():void;save(value:SaveVendor):void}) { return <Modal title={initial?"Edit vendor":"Add vendor"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),address:nullable(d,"address"),defaultCurrency:String(d.get("currency")) as "AED"|"USD",paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Vendor ID</span><b>{initial?.code||"Created automatically"}</b><small>Vendor invoices and costs remain linked to this record.</small></div><Field label="Legal name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="TRN / VAT number"><input name="trn" defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Address"><textarea name="address" rows={3} defaultValue={initial?.address||""}/></Field><div className="three"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Default currency"><select name="currency" defaultValue={initial?.defaultCurrency||"AED"}><option>USD</option><option>AED</option></select></Field><Field label="Payment terms"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field></div><FormButtons label="Save vendor" close={close}/></form></Modal>; }
 
-function NewVendorInvoiceEditor({data,jobs,invoices,draftOwner,close,save}:{data:MasterData;jobs:JobSummary[];invoices:Invoice[];draftOwner:string;close():void;save(value:SaveVendorBill,file:File):Promise<boolean>}) {
+function NewVendorInvoiceEditor({data,jobs,invoices,bills,draftOwner,close,save}:{data:MasterData;jobs:JobSummary[];invoices:Invoice[];bills:VendorBill[];draftOwner:string;close():void;save(value:SaveVendorBill,file:File):Promise<boolean>}) {
   const [vendorId,setVendorId]=useState("");
   const [jobId,setJobId]=useState("");
   const [jobSearch,setJobSearch]=useState("");
@@ -2252,7 +2253,7 @@ function NewVendorInvoiceEditor({data,jobs,invoices,draftOwner,close,save}:{data
     ...jobs.map(job=>[job.id,{id:job.id,jobNumber:job.jobNumber,customerName:job.customerName,hbl:job.hbl,mbl:job.mbl}] as const),
     ...invoices.map(invoice=>[invoice.jobId,{id:invoice.jobId,jobNumber:invoice.jobNumber,customerName:invoice.customerName,hbl:invoice.hbl,mbl:invoice.mbl}] as const),
   ]).values());
-  const availableJobs=jobOptions.filter(job=>`${job.jobNumber} ${job.customerName} ${job.hbl||""} ${job.mbl||""}`.toLowerCase().includes(jobSearch.trim().toLowerCase()));
+  const availableJobs=jobOptions.filter(job=>!bills.some(bill=>bill.jobId===job.id)&&`${job.jobNumber} ${job.customerName} ${job.hbl||""} ${job.mbl||""}`.toLowerCase().includes(jobSearch.trim().toLowerCase()));
   const availableInvoices=invoices.filter(invoice=>invoice.jobId===jobId&&(invoice.id===customerInvoiceId||`${invoice.invoiceNumber||invoice.draftReference} ${invoice.hbl||""} ${invoice.mbl||""} ${invoice.customerName}`.toLowerCase().includes(invoiceSearch.trim().toLowerCase())));
   const selectedJob=jobOptions.find(job=>job.id===jobId);
   const linkedInvoice=invoices.find(invoice=>invoice.id===customerInvoiceId);
