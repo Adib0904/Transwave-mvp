@@ -1,7 +1,9 @@
-import { Controller, Get, Inject, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Inject, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { authEventSchema, type AuthEvent } from "@transwave/contracts";
 import type { AuthenticatedRequest } from "../auth/authenticated-request.js";
 import { SupabaseAuthGuard } from "../auth/supabase-auth.guard.js";
+import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
 import { AuditLogsService } from "./audit-logs.service.js";
 
 @ApiTags("audit logs")
@@ -15,5 +17,12 @@ export class AuditLogsController {
   @ApiOperation({ summary: "List recent company changes for owners and administrators" })
   list(@Req() request: AuthenticatedRequest, @Query() query: Record<string, string | undefined>) {
     return this.auditLogs.list(request.database, request.auth.userId, query);
+  }
+
+  @Post("auth-event")
+  @HttpCode(204)
+  @ApiOperation({ summary: "Record the signed-in user's login or logout event" })
+  recordAuthEvent(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(authEventSchema)) input: AuthEvent) {
+    return this.auditLogs.recordAuthEvent(request.database, request.auth.userId, request.auth.email, input.event);
   }
 }

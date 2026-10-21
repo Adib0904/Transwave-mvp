@@ -67,6 +67,8 @@ export const auditLogPageSchema = z.object({
   page: z.number().int().positive(),
   pageSize: z.number().int().positive(),
 });
+export const authEventSchema = z.object({ event: z.enum(["login", "logout"]) });
+export type AuthEvent = z.infer<typeof authEventSchema>;
 
 export const createManagedUserSchema = z.object({
   email: z.string().trim().toLowerCase().email(),

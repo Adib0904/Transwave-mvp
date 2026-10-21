@@ -32,8 +32,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [session?.user.id]);
 
   const value = useMemo<AuthValue>(() => ({ session, user, loading, error,
-    async signIn(email, password) { setLoading(true); setError(""); const result = await supabase.auth.signInWithPassword({ email, password }); if (result.error) { setLoading(false); throw result.error; } },
-    async signOut() { await supabase.auth.signOut(); setUser(null); }
+    async signIn(email, password) {
+      setLoading(true); setError("");
+      const result = await supabase.auth.signInWithPassword({ email, password });
+      if (result.error) { setLoading(false); throw result.error; }
+      if (result.data.session) await api.authEvent(result.data.session, "login").catch(() => undefined);
+    },
+    async signOut() {
+      const activeSession = sessionRef.current;
+      if (activeSession) await api.authEvent(activeSession, "logout").catch(() => undefined);
+      await supabase.auth.signOut(); setUser(null);
+    }
   }), [session, user, loading, error]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
