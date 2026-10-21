@@ -17,7 +17,7 @@ export function printInvoice(invoiceId: string, environment: PrintEnvironment = 
     environment.removeEventListener("afterprint", restore);
     if (timer !== undefined) environment.clearTimeout(timer);
   };
-  environment.document.title = invoiceId.replace(/[\\:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 180) || "INVOICE";
+  environment.document.title = invoiceId.replace(/[^a-z\d]/gi, "").slice(0, 180) || "INVOICE";
   environment.addEventListener("afterprint", restore);
   timer = environment.setTimeout(restore, 60000);
   try { environment.print(); } catch (error) { restore(); throw error; }
@@ -28,5 +28,5 @@ export function invoicePrintTitle(invoice: { hbl: string | null; mbl: string | n
   const bl = invoice.hbl || invoice.mbl || "";
   const suffix = bl.replace(/[^a-z\d]/gi, "").slice(-5).toUpperCase();
   const invoiceRef = invoice.invoiceNumber || invoice.draftReference || "INVOICE";
-  return suffix ? `${invoiceRef} - BL-${suffix}` : invoiceRef;
+  return `${invoiceRef}${suffix ? `BL${suffix}` : ""}`.replace(/[^a-z\d]/gi, "");
 }
