@@ -122,6 +122,7 @@ const activityRecordTypeLabel = (value: string) => {
     branches: "Branch",
     ports: "Port",
     users: "User access",
+    auth: "Access event",
   };
   return labels[value.toLowerCase()] ?? label(value).replace(/s$/, "").replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
@@ -192,6 +193,7 @@ export function Workspace() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [editingPort, setEditingPort] = useState<Port | null>(null);
   const [editingService, setEditingService] = useState<
@@ -468,6 +470,7 @@ export function Workspace() {
     goTo(next);
     if (!editorPage) setDialog(null);
     setProfileOpen(false);
+    setMobileMenuOpen(false);
     setError("");
   };
   const openNewJob = () => {
@@ -517,9 +520,39 @@ export function Workspace() {
   return (
     <main className="app-shell" onInputCapture={uppercaseApplicationInput}>
       <div className="mobile-app-bar">
-        <span className="mobile-brand-slot">
-          <img className="mobile-brand-logo" src="/images/tsw-logo.png" alt="TransWave Shipping and Logistics" />
-        </span>
+        <div className="mobile-app-bar-brand">
+          <button
+            type="button"
+            className="mobile-menu-trigger"
+            aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-navigation-menu"
+            onClick={() => { setProfileOpen(false); setMobileMenuOpen((open) => !open); }}
+          >
+            <span aria-hidden="true"><i /><i /><i /></span>
+          </button>
+          <span className="mobile-brand-slot">
+            <img className="mobile-brand-logo" src="/images/tsw-logo.png" alt="TransWave Shipping and Logistics" />
+          </span>
+        </div>
+        {mobileMenuOpen && <>
+          <button className="mobile-menu-backdrop" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />
+          <nav id="mobile-navigation-menu" className="mobile-navigation-menu" aria-label="Main navigation">
+            <div className="mobile-navigation-head">
+              <h2>Menu</h2>
+              <button type="button" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)}>×</button>
+            </div>
+            {pages.map((item) => (
+              <button
+                key={item}
+                type="button"
+                aria-current={page === item || (page === "New Job" && item === "Jobs") || (page === "New Vendor Invoice" && item === "Costs") ? "page" : undefined}
+                className={page === item || (page === "New Job" && item === "Jobs") || (page === "New Vendor Invoice" && item === "Costs") ? "menu active" : "menu"}
+                onClick={() => nav(item)}
+              ><span>{icons[item]}</span>{item}</button>
+            ))}
+          </nav>
+        </>}
         <div className="mobile-profile-area">
           {profileOpen && (
             <>
@@ -534,7 +567,7 @@ export function Workspace() {
             </div>
             </>
           )}
-          <button className="profile-trigger mobile-profile-trigger" aria-expanded={profileOpen} aria-label="Open profile" onClick={() => setProfileOpen((open) => !open)}>
+          <button className="profile-trigger mobile-profile-trigger" aria-expanded={profileOpen} aria-label="Open profile" onClick={() => { setMobileMenuOpen(false); setProfileOpen((open) => !open); }}>
             <i>{profileInitials}</i>
             <span><b>{profileName}</b><small>{label(user.role)}</small></span>
             <em>⌄</em>
@@ -2412,8 +2445,8 @@ function ActivityLogs({ session, users }: { session: Session; users: ManagedUser
   const [toDate, setToDate] = useState("");
   const [pageSize, setPageSize] = useState(10);
   const lastDebouncedSearch = useRef("");
-  const actionTypes = ["created", "updated", "deleted", "other"];
-  const entityTypes = ["job", "invoice", "customers", "vendors", "vendor_bill", "vendor_bills", "vendor_bill_lines", "invoice_lines", "shipments", "job_services", "containers", "job_charges", "services", "tax_rates", "branches", "ports"];
+  const actionTypes = ["created", "updated", "deleted", "login", "logout", "other"];
+  const entityTypes = ["job", "invoice", "customers", "vendors", "vendor_bill", "vendor_bills", "vendor_bill_lines", "invoice_lines", "shipments", "job_services", "containers", "job_charges", "services", "tax_rates", "branches", "ports", "auth"];
   const hasFilters = Boolean(search || actionFilter !== "all" || entityFilter !== "all" || actorFilter !== "all" || fromDate || toDate);
   useEffect(() => {
     if (lastDebouncedSearch.current === search) return;
@@ -2430,7 +2463,7 @@ function ActivityLogs({ session, users }: { session: Session; users: ManagedUser
     <Panel title="Activity log" sub="Review company changes">
       <div className="activity-filters">
         <label className="activity-search">Search activity<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search actions or record types" /></label>
-        <label>Action<select value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}><option value="all">All actions</option>{actionTypes.map((action) => <option key={action} value={action}>{action[0].toUpperCase() + action.slice(1)}</option>)}</select></label>
+        <label>Action<select value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}><option value="all">All actions</option>{actionTypes.map((action) => <option key={action} value={action}>{({ login: "Logged in", logout: "Logged out" } as Record<string, string>)[action] ?? action[0].toUpperCase() + action.slice(1)}</option>)}</select></label>
         <label>Record type<select value={entityFilter} onChange={(event) => setEntityFilter(event.target.value)}><option value="all">All records</option><option value="jobs">Jobs</option><option value="invoices">Invoices</option><option value="costs">Costs</option><option value="masters">Masters</option><option value="other">Other activity</option><optgroup label="Individual record types">{entityTypes.map((entity) => <option key={entity} value={entity}>{activityRecordTypeLabel(entity)}</option>)}</optgroup></select></label>
         <label>Changed by<select value={actorFilter} onChange={(event) => setActorFilter(event.target.value)}><option value="all">Everyone</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}</select></label>
         <label>From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>

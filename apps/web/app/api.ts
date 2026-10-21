@@ -131,6 +131,7 @@ export const api = {
     }
     return call<AuditLogPage>(s, `/audit-logs?${params.toString()}`);
   },
+  authEvent: (s: Session, event: "login" | "logout") => call<void>(s, "/audit-logs/auth-event", { method: "POST", body: JSON.stringify({ event }) }),
   createUser: (s: Session, value: CreateManagedUser) => call<ManagedUser>(s, "/users", { method: "POST", body: JSON.stringify(value) }),
   updateUser: (s: Session, id: string, value: UpdateManagedUser) => call<ManagedUser>(s, `/users/${id}`, { method: "PATCH", body: JSON.stringify(value) })
 };
