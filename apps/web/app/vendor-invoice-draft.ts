@@ -4,6 +4,7 @@ export type VendorInvoiceDraft = {
   vendorId: string;
   jobId: string;
   customerInvoiceId: string;
+  paymentDate?: string;
   totalAmount: string;
   currency: "AED" | "USD";
   exchangeRate: string;

@@ -84,6 +84,7 @@ export class VendorBillsService {
       p_vendor_invoice_number: input.vendorInvoiceNumber,
       p_bill_date: input.billDate,
       p_due_date: input.dueDate,
+      p_payment_date: input.paymentDate,
       p_date_of_supply: input.dateOfSupply,
       p_bl_number: input.blNumber,
       p_department: input.department,
@@ -92,8 +93,8 @@ export class VendorBillsService {
       p_status: input.status,
       p_revenue_allocated_aed: Number(input.revenueAllocatedAed),
       p_lines: input.lines,
-    } as unknown as Database["public"]["Functions"]["save_vendor_bill"]["Args"];
-    const { data, error } = await database.rpc("save_vendor_bill", args);
+    } as unknown as Database["public"]["Functions"]["save_vendor_bill_with_payment_date"]["Args"];
+    const { data, error } = await database.rpc("save_vendor_bill_with_payment_date", args);
     if (error) throwDatabaseError(error);
     return requireData(data, null, "Vendor bill was not saved");
   }
@@ -123,6 +124,7 @@ export class VendorBillsService {
       vendorInvoiceNumber: bill.vendor_invoice_number,
       billDate: bill.bill_date,
       dueDate: bill.due_date,
+      paymentDate: bill.payment_date,
       dateOfSupply: bill.date_of_supply,
       blNumber: bill.bl_number,
       department: bill.department,

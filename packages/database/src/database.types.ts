@@ -1209,6 +1209,7 @@ export type Database = {
           date_of_supply: string | null
           department: string | null
           due_date: string | null
+          payment_date: string | null
           id: string
           job_id: string
           remarks: string | null
@@ -1229,6 +1230,7 @@ export type Database = {
           date_of_supply?: string | null
           department?: string | null
           due_date?: string | null
+          payment_date?: string | null
           id?: string
           job_id: string
           remarks?: string | null
@@ -1249,6 +1251,7 @@ export type Database = {
           date_of_supply?: string | null
           department?: string | null
           due_date?: string | null
+          payment_date?: string | null
           id?: string
           job_id?: string
           remarks?: string | null
@@ -1484,6 +1487,27 @@ export type Database = {
           p_id: string
           p_job_id: string
           p_lines: Json
+          p_remarks: string
+          p_revenue_allocated_aed: number
+          p_source_file_name: string
+          p_status: string
+          p_vendor_id: string
+          p_vendor_invoice_number: string
+        }
+        Returns: string
+      }
+      save_vendor_bill_with_payment_date: {
+        Args: {
+          p_bill_date: string
+          p_bl_number: string
+          p_customer_invoice_id: string
+          p_date_of_supply: string
+          p_department: string
+          p_due_date: string
+          p_id: string
+          p_job_id: string
+          p_lines: Json
+          p_payment_date: string
           p_remarks: string
           p_revenue_allocated_aed: number
           p_source_file_name: string
