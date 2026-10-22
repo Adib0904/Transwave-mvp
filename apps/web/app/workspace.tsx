@@ -2128,6 +2128,11 @@ function Invoices({
 function Costs({ bills, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { bills: VendorBill[]; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
   const [listView, setListView] = useState<"invoices" | "vendors">("invoices");
   const [vendorSearch, setVendorSearch] = useState("");
+  const [billSearch, setBillSearch] = useState("");
+  const [billVendorFilter, setBillVendorFilter] = useState("");
+  const [billStatusFilter, setBillStatusFilter] = useState("ALL");
+  const [paymentDateFrom, setPaymentDateFrom] = useState("");
+  const [paymentDateTo, setPaymentDateTo] = useState("");
   const [wideLayout, setWideLayout] = useState(false);
   const autoSelectedFirst = useRef(false);
   const linkedCustomerInvoice = selected
@@ -2142,6 +2147,34 @@ function Costs({ bills, invoices, vendors, selected, routeId, canEdit, onOpen, o
   const profit = revenue - expense;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
   const matchingVendors = vendors.filter((vendor) => `${vendor.name} ${vendor.code} ${vendor.trn || ""}`.toLowerCase().includes(vendorSearch.trim().toLowerCase()));
+  const matchingBills = bills.filter((bill) => {
+    const linkedInvoice = invoices.find((invoice) => invoice.id === bill.customerInvoiceId);
+    const searchable = [
+      bill.vendorInvoiceNumber,
+      bill.vendorName,
+      bill.vendorCode,
+      bill.jobNumber,
+      bill.billDate,
+      bill.dueDate,
+      bill.dateOfSupply,
+      bill.paymentDate,
+      bill.status,
+      bill.blNumber,
+      bill.sourceFileName,
+      bill.customerInvoiceNumber,
+      bill.remarks,
+      linkedInvoice?.vessel,
+      linkedInvoice?.voyage,
+      ...bill.lines.flatMap((line) => [line.description, line.serviceName]),
+    ].filter(Boolean).join(" ").toLowerCase();
+    if (billSearch.trim() && !searchable.includes(billSearch.trim().toLowerCase())) return false;
+    if (billVendorFilter && bill.vendorId !== billVendorFilter) return false;
+    if (billStatusFilter === "PAID" && bill.status !== "PAID") return false;
+    if (billStatusFilter === "UNPAID" && bill.status === "PAID") return false;
+    if (paymentDateFrom && (!bill.paymentDate || bill.paymentDate < paymentDateFrom)) return false;
+    if (paymentDateTo && (!bill.paymentDate || bill.paymentDate > paymentDateTo)) return false;
+    return true;
+  });
 
   useEffect(() => {
     const wide = window.matchMedia("(min-width: 761px)");
@@ -2161,11 +2194,11 @@ function Costs({ bills, invoices, vendors, selected, routeId, canEdit, onOpen, o
       return;
     }
     if (!wideLayout || detailOnly || listView !== "invoices" || autoSelectedFirst.current) return;
-    const firstBill = bills[0];
+    const firstBill = matchingBills[0];
     if (!firstBill) return;
     autoSelectedFirst.current = true;
     onOpen(firstBill.id);
-  }, [wideLayout, detailOnly, selected, routeId, listView, bills, onOpen]);
+  }, [wideLayout, detailOnly, selected, routeId, listView, bills, matchingBills, onOpen]);
 
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
     {!detailOnly && <div className="metrics cost-metrics">
@@ -2175,14 +2208,25 @@ function Costs({ bills, invoices, vendors, selected, routeId, canEdit, onOpen, o
       <Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0} />
     </div>}
     <div className={`${detailOnly ? "cost-layout record-page" : "cost-layout"}${selected && !detailOnly ? " mobile-cost-detail-layout" : !detailOnly ? " mobile-cost-list-layout" : ""}`}>
-      {!detailOnly && <Panel title={listView === "invoices" ? "Vendor invoices" : "Vendor master"} sub={listView === "invoices" ? `${bills.length} recorded expense${bills.length === 1 ? "" : "s"}` : `${vendors.length} shipping and service vendor${vendors.length === 1 ? "" : "s"}`}>
+      {!detailOnly && <Panel title={listView === "invoices" ? "Vendor invoices" : "Vendor master"} sub={listView === "invoices" ? `${matchingBills.length} of ${bills.length} vendor invoice${bills.length === 1 ? "" : "s"}` : `${vendors.length} shipping and service vendor${vendors.length === 1 ? "" : "s"}`}>
         <div className="cost-list-switcher" role="tablist" aria-label="Costs lists">
           <button type="button" role="tab" aria-selected={listView === "invoices"} className={listView === "invoices" ? "active" : ""} onClick={() => setListView("invoices")}>Invoices <span>{bills.length}</span></button>
           <button type="button" role="tab" aria-selected={listView === "vendors"} className={listView === "vendors" ? "active" : ""} onClick={() => setListView("vendors")}>Vendors <span>{vendors.length}</span></button>
         </div>
-        {listView === "invoices" ? <div className="invoice-list">{bills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { setListView("invoices"); onOpen(bill.id); }}>
-          <b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span><Tag text={vendorBillStatusLabel(bill.status)} /><strong>{money.format(Number(bill.totalAmountAed))}</strong>
-        </button>)}</div> : <div className="cost-vendor-directory">
+        {listView === "invoices" ? <>
+          <div className="vendor-invoice-filters">
+            <Field label="Search vendor invoices"><input type="search" value={billSearch} onChange={(event) => setBillSearch(event.target.value)} placeholder="Invoice no., file name, B/L, job, vendor, vessel…" /></Field>
+            <div className="vendor-invoice-filter-grid">
+              <Field label="Vendor"><select value={billVendorFilter} onChange={(event) => setBillVendorFilter(event.target.value)}><option value="">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
+              <Field label="Payment status"><select value={billStatusFilter} onChange={(event) => setBillStatusFilter(event.target.value)}><option value="ALL">All statuses</option><option value="PAID">Paid</option><option value="UNPAID">Unpaid</option></select></Field>
+              <Field label="Paid from"><input type="date" value={paymentDateFrom} onChange={(event) => setPaymentDateFrom(event.target.value)} /></Field>
+              <Field label="Paid to"><input type="date" value={paymentDateTo} onChange={(event) => setPaymentDateTo(event.target.value)} /></Field>
+            </div>
+          </div>
+          <div className="invoice-list">{matchingBills.length ? matchingBills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { setListView("invoices"); onOpen(bill.id); }}>
+            <b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span>{(bill.blNumber || bill.sourceFileName) && <small>{[bill.blNumber && `B/L ${bill.blNumber}`, bill.sourceFileName].filter(Boolean).join(" · ")}</small>}<Tag text={vendorBillStatusLabel(bill.status)} /><strong>{money.format(Number(bill.totalAmountAed))}</strong>
+          </button>) : <p className="empty-inline">No vendor invoices match these filters.</p>}</div>
+        </> : <div className="cost-vendor-directory">
           <label className="cost-vendor-search">Search vendors<input type="search" value={vendorSearch} onChange={(event) => setVendorSearch(event.target.value)} placeholder="Name, vendor code, or TRN" /></label>
           <div className="record-list">{matchingVendors.length ? matchingVendors.map((vendor) => <div key={vendor.id}>
             <span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn || "No TRN"}</small></span>
