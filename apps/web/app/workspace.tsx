@@ -190,6 +190,7 @@ export function Workspace() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [vendorBills, setVendorBills] = useState<VendorBill[]>([]);
   const [selectedVendorBill, setSelectedVendorBill] = useState<VendorBill | null>(null);
+  const [vendorInvoicePrefill, setVendorInvoicePrefill] = useState<{ jobId: string; customerInvoiceId: string } | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -484,11 +485,20 @@ export function Workspace() {
   };
   const openNewVendorInvoice = () => {
     setSelectedVendorBill(null);
+    setVendorInvoicePrefill(null);
+    setDialog(null);
+    setError("");
+    goTo("New Vendor Invoice");
+  };
+  const openVendorInvoiceForInvoice = (invoice: Invoice) => {
+    setSelectedVendorBill(null);
+    setVendorInvoicePrefill({ jobId: invoice.jobId, customerInvoiceId: invoice.id });
     setDialog(null);
     setError("");
     goTo("New Vendor Invoice");
   };
   const closeVendorInvoicePage = () => {
+    setVendorInvoicePrefill(null);
     goTo("Costs");
   };
   if (!session || !user || !masters)
@@ -774,6 +784,8 @@ export function Workspace() {
             jobs={jobs}
             invoices={invoices}
             bills={vendorBills}
+            initialJobId={vendorInvoicePrefill?.jobId}
+            initialCustomerInvoiceId={vendorInvoicePrefill?.customerInvoiceId}
             draftOwner={user.userId}
             close={closeVendorInvoicePage}
             save={(input, file) => act(async () => {
@@ -799,7 +811,11 @@ export function Workspace() {
             selected={record?.section === "invoices" ? selectedInvoice : null}
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
+            canManageVendorInvoices={canManageBilling}
+            relatedVendorBill={selectedInvoice ? vendorBills.find((bill) => bill.jobId === selectedInvoice.jobId) ?? null : null}
             onEdit={() => setDialog("invoiceEdit")}
+            onAddVendorInvoice={() => selectedInvoice && openVendorInvoiceForInvoice(selectedInvoice)}
+            onOpenVendorBill={openVendorBill}
             onMarkPaid={async (paymentDate) => {
               if (!selectedInvoice) return false;
               const success = await act(
@@ -1733,8 +1749,12 @@ function Invoices({
   selected,
   canIssue,
   canCreateSimilar,
+  canManageVendorInvoices,
+  relatedVendorBill,
   onOpen,
   onCreateSimilar,
+  onAddVendorInvoice,
+  onOpenVendorBill,
   onEdit,
   onMarkPaid,
   onIssue,
@@ -1744,8 +1764,12 @@ function Invoices({
   selected: Invoice | null;
   canIssue: boolean;
   canCreateSimilar: boolean;
+  canManageVendorInvoices: boolean;
+  relatedVendorBill: VendorBill | null;
   onOpen(id: string): void;
   onCreateSimilar(): void;
+  onAddVendorInvoice(): void;
+  onOpenVendorBill(id: string): void;
   onEdit(): void;
   onMarkPaid(paymentDate: string): Promise<boolean>;
   onIssue(): void;
@@ -2031,6 +2055,15 @@ function Invoices({
             </strong>
           </div>
           <div className="form-actions">
+            {canManageVendorInvoices && (relatedVendorBill ? (
+              <button className="soft" type="button" onClick={() => onOpenVendorBill(relatedVendorBill.id)}>
+                View vendor invoice
+              </button>
+            ) : (
+              <button className="soft" type="button" onClick={onAddVendorInvoice}>
+                + Vendor invoice
+              </button>
+            ))}
             {canIssue && selected.status === "ISSUED" && selected.paymentStatus === "UNPAID" && (
               <button
                 className="button"
@@ -2277,17 +2310,17 @@ function defaultVendorBillRemarks(invoice?: Invoice | null) {
 
 function VendorDialog({initial,close,save}:{initial:Vendor|null;close():void;save(value:SaveVendor):void}) { return <Modal title={initial?"Edit vendor":"Add vendor"} close={close}><form onSubmit={event=>{event.preventDefault();const d=new FormData(event.currentTarget);save({name:String(d.get("name")),trn:nullable(d,"trn"),email:nullable(d,"email"),phone:nullable(d,"phone"),address:nullable(d,"address"),defaultCurrency:String(d.get("currency")) as "AED"|"USD",paymentTermsDays:Number(d.get("terms")),active:initial?.active??true})}}><div className="auto-number"><span>Vendor ID</span><b>{initial?.code||"Created automatically"}</b><small>Vendor invoices and costs remain linked to this record.</small></div><Field label="Legal name"><input name="name" required defaultValue={initial?.name}/></Field><div className="two"><Field label="TRN / VAT number"><input name="trn" defaultValue={initial?.trn||""}/></Field><Field label="Billing email"><input name="email" type="email" defaultValue={initial?.email||""}/></Field></div><Field label="Address"><textarea name="address" rows={3} defaultValue={initial?.address||""}/></Field><div className="three"><Field label="Phone"><input name="phone" defaultValue={initial?.phone||""}/></Field><Field label="Default currency"><select name="currency" defaultValue={initial?.defaultCurrency||"AED"}><option>USD</option><option>AED</option></select></Field><Field label="Payment terms"><input name="terms" type="number" min="0" max="365" defaultValue={initial?.paymentTermsDays??30}/></Field></div><FormButtons label="Save vendor" close={close}/></form></Modal>; }
 
-function NewVendorInvoiceEditor({data,jobs,invoices,bills,draftOwner,close,save}:{data:MasterData;jobs:JobSummary[];invoices:Invoice[];bills:VendorBill[];draftOwner:string;close():void;save(value:SaveVendorBill,file:File):Promise<boolean>}) {
+function NewVendorInvoiceEditor({data,jobs,invoices,bills,draftOwner,initialJobId,initialCustomerInvoiceId,close,save}:{data:MasterData;jobs:JobSummary[];invoices:Invoice[];bills:VendorBill[];draftOwner:string;initialJobId?:string;initialCustomerInvoiceId?:string;close():void;save(value:SaveVendorBill,file:File):Promise<boolean>}) {
   const [vendorId,setVendorId]=useState("");
-  const [jobId,setJobId]=useState("");
+  const [jobId,setJobId]=useState(initialJobId||"");
   const [jobSearch,setJobSearch]=useState("");
-  const [customerInvoiceId,setCustomerInvoiceId]=useState("");
+  const [customerInvoiceId,setCustomerInvoiceId]=useState(initialCustomerInvoiceId||"");
   const [paymentDate,setPaymentDate]=useState("");
   const [invoiceSearch,setInvoiceSearch]=useState("");
   const [totalAmount,setTotalAmount]=useState("");
   const [currency,setCurrency]=useState<"AED"|"USD">("AED");
   const [exchangeRate,setExchangeRate]=useState("1");
-  const [remarks,setRemarks]=useState("");
+  const [remarks,setRemarks]=useState(()=>initialCustomerInvoiceId?defaultVendorBillRemarks(invoices.find(invoice=>invoice.id===initialCustomerInvoiceId)):"");
   const [document,setDocument]=useState<File|null>(null);
   const [documentCompressing,setDocumentCompressing]=useState(false);
   const [submitting,setSubmitting]=useState(false);
