@@ -128,6 +128,30 @@ const activityRecordTypeLabel = (value: string) => {
 };
 const vendorBillStatusLabel = (status: VendorBill["status"]) =>
   status === "DRAFT" ? "PENDING REVIEW" : label(status);
+function usePersistedViewState<T>(key: string, initialValue: T) {
+  const [value, setValue] = useState<T>(initialValue);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    setLoaded(false);
+    try {
+      const stored = window.localStorage.getItem(key);
+      setValue(stored ? JSON.parse(stored) as T : initialValue);
+    } catch {
+      setValue(initialValue);
+    }
+    setLoaded(true);
+  }, [key]);
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Persisting view preferences is best-effort when storage is unavailable.
+    }
+  }, [key, loaded, value]);
+  return [value, setValue, loaded] as const;
+}
+
 const recordRoute = (pathname: string) => {
   const [section, id] = pathname.split("/").filter(Boolean);
   return id && id !== "new" ? { section, id } : null;
@@ -321,6 +345,15 @@ export function Workspace() {
     }
   }, [pathname, record?.id, record?.section, userId, masters, vendorBills]);
 
+  useEffect(() => {
+    if (!userId || !record) return;
+    try {
+      window.localStorage.setItem(`transwave:${userId}:last-detail:${record.section}`, pathname);
+    } catch {
+      // Keep navigation usable when browser storage is unavailable.
+    }
+  }, [pathname, record?.section, record?.id, userId]);
+
   const goTo = (next: Page) => {
     const destination = navigationPaths[next];
     if (pathname !== destination) router.push(destination);
@@ -468,7 +501,21 @@ export function Workspace() {
     });
   }
   const nav = (next: Page) => {
-    goTo(next);
+    const destination = navigationPaths[next];
+    const sectionByPage: Partial<Record<NavigationPage, string>> = {
+      Customers: "customers", Jobs: "jobs", Invoices: "invoices", Costs: "costs",
+    };
+    const rememberedSection = sectionByPage[next as NavigationPage];
+    let rememberedPath: string | null = null;
+    if (userId && rememberedSection && page !== next) {
+      try {
+        const candidate = window.localStorage.getItem(`transwave:${userId}:last-detail:${rememberedSection}`);
+        if (candidate?.startsWith(`${destination}/`)) rememberedPath = candidate;
+      } catch {
+        // Fall back to the page list if browser storage is unavailable.
+      }
+    }
+    router.push(rememberedPath || destination);
     if (!editorPage) setDialog(null);
     setProfileOpen(false);
     setMobileMenuOpen(false);
@@ -635,7 +682,7 @@ export function Workspace() {
           <div className="header-actions">
             {record ? (
               <>
-                <button className={record.section === "costs" ? "soft cost-back-button" : "soft"} onClick={() => goTo(page as NavigationPage)}>← Back to {page.toLowerCase()}</button>
+                <button className={record.section === "costs" ? "soft cost-back-button" : "soft"} onClick={() => { try { window.localStorage.removeItem(`transwave:${user.userId}:last-detail:${record.section}`); } catch {} goTo(page as NavigationPage); }}>← Back to {page.toLowerCase()}</button>
                 {record.section === "costs" && canManageBilling && (
                   <>
                     <button className="soft" onClick={() => void load()}>Refresh</button>
@@ -702,6 +749,7 @@ export function Workspace() {
           <Dashboard
             jobs={jobs}
             invoices={invoices}
+            viewStateKey={`transwave:${user.userId}:dashboard`}
             onJob={openJob}
             onNavigate={nav}
             canViewFinancials={["OWNER", "ADMIN"].includes(user.role)}
@@ -807,6 +855,7 @@ export function Workspace() {
         )}
         {page === "Invoices" && (
           <Invoices
+            viewStateKey={`transwave:${user.userId}:invoices`}
             invoices={invoices}
             selected={record?.section === "invoices" ? selectedInvoice : null}
             canIssue={canManageBilling}
@@ -890,6 +939,7 @@ export function Workspace() {
         )}
         {page === "Costs" && (
           <Costs
+            viewStateKey={`transwave:${user.userId}:costs`}
             bills={vendorBills}
             invoices={invoices}
             vendors={masters.vendors}
@@ -973,7 +1023,7 @@ export function Workspace() {
           />
         )}
         {page === "Activity" && ["OWNER", "ADMIN"].includes(user.role) && (
-          <ActivityLogs session={session} users={users} />
+          <ActivityLogs session={session} users={users} viewStateKey={`transwave:${user.userId}:activity`} />
         )}
       </section>
       {dialog === "customer" && (
@@ -1192,21 +1242,26 @@ export function Workspace() {
 function Dashboard({
   jobs,
   invoices,
+  viewStateKey,
   onJob,
   onNavigate,
   canViewFinancials,
 }: {
   jobs: JobSummary[];
   invoices: Invoice[];
+  viewStateKey: string;
   onJob(id: string): void;
   onNavigate(page: Page): void;
   canViewFinancials: boolean;
 }) {
-  const [revenuePeriod, setRevenuePeriod] = useState<"month" | "year" | "all">("month");
   const now = new Date();
   const currentYear = String(now.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
-  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [reportView, setReportView] = usePersistedViewState(viewStateKey, {
+    revenuePeriod: "month" as "month" | "year" | "all",
+    selectedMonth: String(now.getMonth() + 1).padStart(2, "0"),
+    selectedYear: currentYear,
+  });
+  const { revenuePeriod, selectedMonth, selectedYear } = reportView;
   const reportYears = [...new Set([
     currentYear,
     ...invoices.flatMap((invoice) => [invoice.paymentDate, invoice.invoiceDate, invoice.issuedAt, invoice.createdAt]
@@ -1309,7 +1364,7 @@ function Dashboard({
                   type="button"
                   className={revenuePeriod === period ? "active" : ""}
                   aria-pressed={revenuePeriod === period}
-                  onClick={() => setRevenuePeriod(period)}
+                  onClick={() => setReportView((state) => ({ ...state, revenuePeriod: period }))}
                 >
                   {period === "month" ? "Monthly" : period === "year" ? "Yearly" : "All time"}
                 </button>
@@ -1318,7 +1373,7 @@ function Dashboard({
             {revenuePeriod !== "all" && <div className="dashboard-date-selectors">
               {revenuePeriod === "month" && <label>
                 <span>Month</span>
-                <select value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)}>
+                <select value={selectedMonth} onChange={(event) => setReportView((state) => ({ ...state, selectedMonth: event.target.value }))}>
                   {Array.from({ length: 12 }, (_, index) => {
                     const value = String(index + 1).padStart(2, "0");
                     const month = new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(2000, index, 1));
@@ -1328,7 +1383,7 @@ function Dashboard({
               </label>}
               <label>
                 <span>Year</span>
-                <select value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)}>
+                <select value={selectedYear} onChange={(event) => setReportView((state) => ({ ...state, selectedYear: event.target.value }))}>
                   {reportYears.map((year) => <option key={year} value={year}>{year}</option>)}
                 </select>
               </label>
@@ -1745,6 +1800,7 @@ function Jobs(props: {
 }
 
 function Invoices({
+  viewStateKey,
   invoices,
   selected,
   canIssue,
@@ -1760,6 +1816,7 @@ function Invoices({
   onIssue,
   detailOnly,
 }: {
+  viewStateKey: string;
   invoices: Invoice[];
   selected: Invoice | null;
   canIssue: boolean;
@@ -1775,7 +1832,7 @@ function Invoices({
   onIssue(): void;
   detailOnly: boolean;
 }) {
-  const [filters, setFilters] = useState<InvoiceFilters>(emptyInvoiceFilters);
+  const [filters, setFilters, filtersLoaded] = usePersistedViewState<InvoiceFilters>(viewStateKey, emptyInvoiceFilters);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentDate, setPaymentDate] = useState("");
@@ -1811,12 +1868,12 @@ function Invoices({
       autoSelectedFirst.current = false;
       return;
     }
-    if (!wideLayout || detailOnly || autoSelectedFirst.current) return;
+    if (!filtersLoaded || !wideLayout || detailOnly || autoSelectedFirst.current) return;
     const firstInvoice = filteredInvoices[0];
     if (!firstInvoice) return;
     autoSelectedFirst.current = true;
     onOpen(firstInvoice.id);
-  }, [wideLayout, detailOnly, selected, filteredInvoices, onOpen]);
+  }, [filtersLoaded, wideLayout, detailOnly, selected, filteredInvoices, onOpen]);
 
   return (
     <div className={`${detailOnly ? "invoice-layout record-page" : "invoice-layout"}${selected && !detailOnly ? " mobile-invoice-detail" : !detailOnly ? " mobile-invoice-list" : ""}`}>
@@ -2158,14 +2215,15 @@ function Invoices({
   );
 }
 
-function Costs({ bills, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { bills: VendorBill[]; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
-  const [listView, setListView] = useState<"invoices" | "vendors">("invoices");
-  const [vendorSearch, setVendorSearch] = useState("");
-  const [billSearch, setBillSearch] = useState("");
-  const [billVendorFilter, setBillVendorFilter] = useState("");
-  const [billStatusFilter, setBillStatusFilter] = useState("ALL");
-  const [paymentDateFrom, setPaymentDateFrom] = useState("");
-  const [paymentDateTo, setPaymentDateTo] = useState("");
+function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { viewStateKey: string; bills: VendorBill[]; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
+  const [viewState, setViewState] = usePersistedViewState(viewStateKey, {
+    listView: "invoices" as "invoices" | "vendors",
+    vendorSearch: "", billSearch: "", billVendorFilter: "", billStatusFilter: "ALL",
+    paymentDateFrom: "", paymentDateTo: "",
+  });
+  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo } = viewState;
+  const updateViewState = <K extends keyof typeof viewState>(key: K, value: (typeof viewState)[K]) =>
+    setViewState((state) => ({ ...state, [key]: value }));
   const [wideLayout, setWideLayout] = useState(false);
   const autoSelectedFirst = useRef(false);
   const linkedCustomerInvoice = selected
@@ -2243,24 +2301,24 @@ function Costs({ bills, invoices, vendors, selected, routeId, canEdit, onOpen, o
     <div className={`${detailOnly ? "cost-layout record-page" : "cost-layout"}${selected && !detailOnly ? " mobile-cost-detail-layout" : !detailOnly ? " mobile-cost-list-layout" : ""}`}>
       {!detailOnly && <Panel title={listView === "invoices" ? "Vendor invoices" : "Vendor master"} sub={listView === "invoices" ? `${matchingBills.length} of ${bills.length} vendor invoice${bills.length === 1 ? "" : "s"}` : `${vendors.length} shipping and service vendor${vendors.length === 1 ? "" : "s"}`}>
         <div className="cost-list-switcher" role="tablist" aria-label="Costs lists">
-          <button type="button" role="tab" aria-selected={listView === "invoices"} className={listView === "invoices" ? "active" : ""} onClick={() => setListView("invoices")}>Invoices <span>{bills.length}</span></button>
-          <button type="button" role="tab" aria-selected={listView === "vendors"} className={listView === "vendors" ? "active" : ""} onClick={() => setListView("vendors")}>Vendors <span>{vendors.length}</span></button>
+          <button type="button" role="tab" aria-selected={listView === "invoices"} className={listView === "invoices" ? "active" : ""} onClick={() => updateViewState("listView", "invoices")}>Invoices <span>{bills.length}</span></button>
+          <button type="button" role="tab" aria-selected={listView === "vendors"} className={listView === "vendors" ? "active" : ""} onClick={() => updateViewState("listView", "vendors")}>Vendors <span>{vendors.length}</span></button>
         </div>
         {listView === "invoices" ? <>
           <div className="vendor-invoice-filters">
-            <Field label="Search vendor invoices"><input type="search" value={billSearch} onChange={(event) => setBillSearch(event.target.value)} placeholder="Invoice no., file name, B/L, job, vendor, vessel…" /></Field>
+            <Field label="Search vendor invoices"><input type="search" value={billSearch} onChange={(event) => updateViewState("billSearch", event.target.value)} placeholder="Invoice no., file name, B/L, job, vendor, vessel…" /></Field>
             <div className="vendor-invoice-filter-grid">
-              <Field label="Vendor"><select value={billVendorFilter} onChange={(event) => setBillVendorFilter(event.target.value)}><option value="">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
-              <Field label="Payment status"><select value={billStatusFilter} onChange={(event) => setBillStatusFilter(event.target.value)}><option value="ALL">All statuses</option><option value="PAID">Paid</option><option value="UNPAID">Unpaid</option></select></Field>
-              <Field label="Paid from"><input type="date" value={paymentDateFrom} onChange={(event) => setPaymentDateFrom(event.target.value)} /></Field>
-              <Field label="Paid to"><input type="date" value={paymentDateTo} onChange={(event) => setPaymentDateTo(event.target.value)} /></Field>
+              <Field label="Vendor"><select value={billVendorFilter} onChange={(event) => updateViewState("billVendorFilter", event.target.value)}><option value="">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
+              <Field label="Payment status"><select value={billStatusFilter} onChange={(event) => updateViewState("billStatusFilter", event.target.value)}><option value="ALL">All statuses</option><option value="PAID">Paid</option><option value="UNPAID">Unpaid</option></select></Field>
+              <Field label="Paid from"><input type="date" value={paymentDateFrom} onChange={(event) => updateViewState("paymentDateFrom", event.target.value)} /></Field>
+              <Field label="Paid to"><input type="date" value={paymentDateTo} onChange={(event) => updateViewState("paymentDateTo", event.target.value)} /></Field>
             </div>
           </div>
-          <div className="invoice-list">{matchingBills.length ? matchingBills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { setListView("invoices"); onOpen(bill.id); }}>
+          <div className="invoice-list">{matchingBills.length ? matchingBills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { updateViewState("listView", "invoices"); onOpen(bill.id); }}>
             <b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span>{(bill.blNumber || bill.sourceFileName) && <small>{[bill.blNumber && `B/L ${bill.blNumber}`, bill.sourceFileName].filter(Boolean).join(" · ")}</small>}<Tag text={vendorBillStatusLabel(bill.status)} /><strong>{money.format(Number(bill.totalAmountAed))}</strong>
           </button>) : <p className="empty-inline">No vendor invoices match these filters.</p>}</div>
         </> : <div className="cost-vendor-directory">
-          <label className="cost-vendor-search">Search vendors<input type="search" value={vendorSearch} onChange={(event) => setVendorSearch(event.target.value)} placeholder="Name, vendor code, or TRN" /></label>
+          <label className="cost-vendor-search">Search vendors<input type="search" value={vendorSearch} onChange={(event) => updateViewState("vendorSearch", event.target.value)} placeholder="Name, vendor code, or TRN" /></label>
           <div className="record-list">{matchingVendors.length ? matchingVendors.map((vendor) => <div key={vendor.id}>
             <span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn || "No TRN"}</small></span>
             <Tag text={vendor.active ? "ACTIVE" : "INACTIVE"} />
@@ -2520,15 +2578,15 @@ function Masters({
   );
 }
 
-function ActivityLogs({ session, users }: { session: Session; users: ManagedUser[] }) {
-  const [search, setSearch] = useState("");
+function ActivityLogs({ session, users, viewStateKey }: { session: Session; users: ManagedUser[]; viewStateKey: string }) {
+  const [viewState, setViewState, viewStateLoaded] = usePersistedViewState(viewStateKey, {
+    search: "", actionFilter: "all", entityFilter: "all", actorFilter: "all",
+    fromDate: "", toDate: "", pageSize: 10, currentPage: 1,
+  });
+  const { search, actionFilter, entityFilter, actorFilter, fromDate, toDate, pageSize, currentPage } = viewState;
+  const updateViewState = <K extends keyof typeof viewState>(key: K, value: (typeof viewState)[K]) =>
+    setViewState((state) => ({ ...state, [key]: value }));
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [actionFilter, setActionFilter] = useState("all");
-  const [entityFilter, setEntityFilter] = useState("all");
-  const [actorFilter, setActorFilter] = useState("all");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [pageSize, setPageSize] = useState(10);
   const lastDebouncedSearch = useRef("");
   const actionTypes = ["created", "updated", "deleted", "login", "logout", "other"];
   const entityTypes = ["job", "invoice", "customers", "vendors", "vendor_bill", "vendor_bills", "vendor_bill_lines", "invoice_lines", "shipments", "job_services", "containers", "job_charges", "services", "tax_rates", "branches", "ports", "auth"];
@@ -2541,48 +2599,52 @@ function ActivityLogs({ session, users }: { session: Session; users: ManagedUser
     }, 300);
     return () => window.clearTimeout(timeout);
   }, [search]);
+  useEffect(() => {
+    if (viewStateLoaded) setDebouncedSearch(search);
+  }, [viewStateLoaded]);
   const clearFilters = () => {
-    setSearch(""); setActionFilter("all"); setEntityFilter("all"); setActorFilter("all"); setFromDate(""); setToDate("");
+    setViewState((state) => ({ ...state, search: "", actionFilter: "all", entityFilter: "all", actorFilter: "all", fromDate: "", toDate: "", currentPage: 1 }));
   };
   return (
     <Panel title="Activity log" sub="Review company changes">
       <div className="activity-filters">
-        <label className="activity-search">Search activity<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search actions or record types" /></label>
-        <label>Action<select value={actionFilter} onChange={(event) => setActionFilter(event.target.value)}><option value="all">All actions</option>{actionTypes.map((action) => <option key={action} value={action}>{({ login: "Logged in", logout: "Logged out" } as Record<string, string>)[action] ?? action[0].toUpperCase() + action.slice(1)}</option>)}</select></label>
-        <label>Record type<select value={entityFilter} onChange={(event) => setEntityFilter(event.target.value)}><option value="all">All records</option><option value="jobs">Jobs</option><option value="invoices">Invoices</option><option value="costs">Costs</option><option value="masters">Masters</option><option value="other">Other activity</option><optgroup label="Individual record types">{entityTypes.map((entity) => <option key={entity} value={entity}>{activityRecordTypeLabel(entity)}</option>)}</optgroup></select></label>
-        <label>Changed by<select value={actorFilter} onChange={(event) => setActorFilter(event.target.value)}><option value="all">Everyone</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}</select></label>
-        <label>From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
-        <label>To<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
+        <label className="activity-search">Search activity<input type="search" value={search} onChange={(event) => setViewState((state) => ({ ...state, search: event.target.value, currentPage: 1 }))} placeholder="Search actions or record types" /></label>
+        <label>Action<select value={actionFilter} onChange={(event) => setViewState((state) => ({ ...state, actionFilter: event.target.value, currentPage: 1 }))}><option value="all">All actions</option>{actionTypes.map((action) => <option key={action} value={action}>{({ login: "Logged in", logout: "Logged out" } as Record<string, string>)[action] ?? action[0].toUpperCase() + action.slice(1)}</option>)}</select></label>
+        <label>Record type<select value={entityFilter} onChange={(event) => setViewState((state) => ({ ...state, entityFilter: event.target.value, currentPage: 1 }))}><option value="all">All records</option><option value="jobs">Jobs</option><option value="invoices">Invoices</option><option value="costs">Costs</option><option value="masters">Masters</option><option value="other">Other activity</option><optgroup label="Individual record types">{entityTypes.map((entity) => <option key={entity} value={entity}>{activityRecordTypeLabel(entity)}</option>)}</optgroup></select></label>
+        <label>Changed by<select value={actorFilter} onChange={(event) => setViewState((state) => ({ ...state, actorFilter: event.target.value, currentPage: 1 }))}><option value="all">Everyone</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}</option>)}</select></label>
+        <label>From<input type="date" value={fromDate} onChange={(event) => setViewState((state) => ({ ...state, fromDate: event.target.value, currentPage: 1 }))} /></label>
+        <label>To<input type="date" value={toDate} onChange={(event) => setViewState((state) => ({ ...state, toDate: event.target.value, currentPage: 1 }))} /></label>
         {hasFilters && <button className="soft activity-clear" onClick={clearFilters}>Clear filters</button>}
       </div>
-      <ActivityResults
+      {viewStateLoaded ? <ActivityResults
         key={`${actionFilter}|${entityFilter}|${actorFilter}|${fromDate}|${toDate}|${debouncedSearch}`}
         session={session}
         users={users}
+        currentPage={currentPage}
+        onCurrentPageChange={(value) => updateViewState("currentPage", value)}
         pageSize={pageSize}
-        onPageSizeChange={setPageSize}
+        onPageSizeChange={(value) => setViewState((state) => ({ ...state, pageSize: value, currentPage: 1 }))}
         actionFilter={actionFilter}
         entityFilter={entityFilter}
         actorFilter={actorFilter}
         fromDate={fromDate}
         toDate={toDate}
         search={debouncedSearch}
-      />
+      /> : <p className="empty-panel">Restoring your activity view…</p>}
     </Panel>
   );
 }
 
 const ActivityResults = memo(function ActivityResults({
-  session, users, pageSize, onPageSizeChange, actionFilter, entityFilter, actorFilter, fromDate, toDate, search,
+  session, users, currentPage, onCurrentPageChange, pageSize, onPageSizeChange, actionFilter, entityFilter, actorFilter, fromDate, toDate, search,
 }: {
-  session: Session; users: ManagedUser[]; pageSize: number; onPageSizeChange(value: number): void;
+  session: Session; users: ManagedUser[]; currentPage: number; onCurrentPageChange(value: number): void; pageSize: number; onPageSizeChange(value: number): void;
   actionFilter: string; entityFilter: string; actorFilter: string; fromDate: string; toDate: string; search: string;
 }) {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);
   const userNames = new Map(users.map((item) => [item.id, item.name || item.email]));
   const localDateBoundary = (date: string, endOfDay = false) => date
@@ -2613,7 +2675,9 @@ const ActivityResults = memo(function ActivityResults({
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [session, currentPage, pageSize, actionFilter, entityFilter, actorFilter, fromDate, toDate, search, refreshKey]);
-  useEffect(() => setCurrentPage((page) => Math.min(page, pageCount)), [pageCount]);
+  useEffect(() => {
+    if (currentPage > pageCount) onCurrentPageChange(pageCount);
+  }, [currentPage, pageCount, onCurrentPageChange]);
 
   const displayValue = (value: unknown) => {
     if (value === null || value === undefined || value === "") return "—";
@@ -2655,11 +2719,11 @@ const ActivityResults = memo(function ActivityResults({
   if (!loading && logs.length === 0) return <div className="empty-panel">No changes match these filters. Adjust your search or clear the filters.</div>;
   return <section className="activity-results" aria-busy={loading}>
     {loading && <div className="activity-table-loading">Updating results…</div>}
-    <div className="activity-table-toolbar"><label className="activity-page-size">Rows per page<select value={pageSize} onChange={(event) => { setCurrentPage(1); onPageSizeChange(Number(event.target.value)); }}><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select></label><button className="soft activity-refresh" onClick={() => setRefreshKey((key) => key + 1)}>Refresh activity</button></div>
+    <div className="activity-table-toolbar"><label className="activity-page-size">Rows per page<select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))}><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select></label><button className="soft activity-refresh" onClick={() => setRefreshKey((key) => key + 1)}>Refresh activity</button></div>
     <div className="activity-table-scroll"><table className="activity-table"><thead><tr><th>Date and time</th><th>Action</th><th>Record</th><th>Record type</th><th>Changed by</th><th>Change details</th></tr></thead><tbody>{logs.map(renderEventRow)}</tbody></table></div>
     <nav className="activity-pagination" aria-label="Activity log pages">
       <span>Showing {Math.min(total, (currentPage - 1) * pageSize + 1)}–{Math.min(total, currentPage * pageSize)} of {total}</span>
-      <div className="activity-page-buttons"><button className="soft" disabled={loading || currentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}>Previous</button>{visiblePages.map((page) => <button key={page} className={page === currentPage ? "activity-page-current" : "soft"} aria-current={page === currentPage ? "page" : undefined} disabled={loading} onClick={() => setCurrentPage(page)}>{page}</button>)}<button className="soft" disabled={loading || currentPage >= pageCount} onClick={() => setCurrentPage((page) => Math.min(pageCount, page + 1))}>Next</button></div>
+      <div className="activity-page-buttons"><button className="soft" disabled={loading || currentPage <= 1} onClick={() => onCurrentPageChange(Math.max(1, currentPage - 1))}>Previous</button>{visiblePages.map((page) => <button key={page} className={page === currentPage ? "activity-page-current" : "soft"} aria-current={page === currentPage ? "page" : undefined} disabled={loading} onClick={() => onCurrentPageChange(page)}>{page}</button>)}<button className="soft" disabled={loading || currentPage >= pageCount} onClick={() => onCurrentPageChange(Math.min(pageCount, currentPage + 1))}>Next</button></div>
     </nav>
   </section>;
 });
