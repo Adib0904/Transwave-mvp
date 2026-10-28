@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { createDraftSchema, markInvoicePaidSchema, updateInvoiceSchema, type CreateDraft, type MarkInvoicePaid, type UpdateInvoice } from "@transwave/contracts";
 import type { AuthenticatedRequest } from "../auth/authenticated-request.js";
@@ -17,6 +17,12 @@ export class InvoicesController {
   @ApiOperation({ summary: "List visible draft and issued invoices" })
   list(@Req() request: AuthenticatedRequest) {
     return this.invoices.list(request.database, request.auth.userId);
+  }
+
+  @Get("page")
+  @ApiOperation({ summary: "Get one page of visible invoices" })
+  listPage(@Req() request: AuthenticatedRequest, @Query("offset") offset?: string, @Query("limit") limit?: string) {
+    return this.invoices.listPage(request.database, request.auth.userId, Number(offset ?? 0), Number(limit ?? 20));
   }
 
   @Get(":id")

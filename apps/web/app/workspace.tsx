@@ -11,6 +11,7 @@ import type {
   JobSummary,
   MasterData,
   Port,
+  RecordPage,
   SaveCustomer,
   SaveJob,
   ManagedUser,
@@ -78,6 +79,18 @@ type Dialog =
   | null;
 type AssignedService = JobDetail["services"][number];
 type RefreshScope = "masters" | "jobs" | "invoices" | "vendorBills" | "users";
+const pageDataScopes: Record<Page, RefreshScope[]> = {
+  Dashboard: ["masters", "jobs", "invoices"],
+  Customers: ["masters"],
+  Jobs: ["masters", "jobs"],
+  Invoices: ["masters"],
+  Costs: ["masters", "jobs", "invoices"],
+  Masters: ["masters"],
+  Users: ["masters", "users"],
+  Activity: ["masters", "users"],
+  "New Job": ["masters"],
+  "New Vendor Invoice": ["masters", "jobs", "invoices", "vendorBills"],
+};
 type Confirmation = {
   title: string;
   message: string;
@@ -135,7 +148,15 @@ function usePersistedViewState<T>(key: string, initialValue: T) {
     setLoaded(false);
     try {
       const stored = window.localStorage.getItem(key);
-      setValue(stored ? JSON.parse(stored) as T : initialValue);
+      const parsed = stored ? JSON.parse(stored) as unknown : initialValue;
+      if (
+        parsed && typeof parsed === "object" && !Array.isArray(parsed) &&
+        initialValue && typeof initialValue === "object" && !Array.isArray(initialValue)
+      ) {
+        setValue({ ...initialValue, ...parsed } as T);
+      } else {
+        setValue(parsed as T);
+      }
     } catch {
       setValue(initialValue);
     }
@@ -150,6 +171,24 @@ function usePersistedViewState<T>(key: string, initialValue: T) {
     }
   }, [key, loaded, value]);
   return [value, setValue, loaded] as const;
+}
+
+function ListPagination({ page, pageSize, total, onPage, onPageSize }: { page: number; pageSize: number; total: number; onPage(page: number): void; onPageSize(size: number): void }) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const visiblePages = Array.from({ length: Math.min(5, pageCount) }, (_, index) => {
+    const start = Math.max(1, Math.min(page - 2, pageCount - 4));
+    return start + index;
+  });
+  if (total <= 10) return null;
+  return <div className="activity-pagination list-pagination">
+    <label className="activity-page-size">Rows per page<select value={pageSize} onChange={(event) => onPageSize(Number(event.target.value))}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select></label>
+    <span>{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}</span>
+    <div className="activity-page-buttons">
+      <button className="soft compact" type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button>
+      {visiblePages.map((number) => <button key={number} className={number === page ? "activity-page-current" : "soft compact"} type="button" aria-current={number === page ? "page" : undefined} onClick={() => onPage(number)}>{number}</button>)}
+      <button className="soft compact" type="button" disabled={page >= pageCount} onClick={() => onPage(page + 1)}>Next</button>
+    </div>
+  </div>;
 }
 
 const recordRoute = (pathname: string) => {
@@ -236,7 +275,8 @@ export function Workspace() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
-  const loadInFlight = useRef<Promise<void> | null>(null);
+  const loadedScopes = useRef(new Set<RefreshScope>());
+  const scopeRequests = useRef(new Map<RefreshScope, Promise<void>>());
   const canManageOperations = ["OWNER", "ADMIN", "OPERATIONS"].includes(
     user?.role ?? "VIEWER",
   );
@@ -265,58 +305,65 @@ export function Workspace() {
                 ? "Users"
                 : null;
 
-  const load = useCallback((): Promise<void> => {
+  const requestScope = useCallback((scope: RefreshScope, activeSession: Session, force = false): Promise<void> => {
+    if (!force && loadedScopes.current.has(scope)) return Promise.resolve();
+    const pending = scopeRequests.current.get(scope);
+    if (pending) return pending;
+    const request = (() => {
+      switch (scope) {
+        case "masters": return api.masters(activeSession).then(setMasters);
+        case "jobs": return api.jobs(activeSession).then((nextJobs) => {
+          setJobs(nextJobs);
+          setSelectedJob((current) => current && nextJobs.some((job) => job.id === current.id) ? current : null);
+        });
+        case "invoices": return api.invoices(activeSession).then(setInvoices);
+        case "vendorBills": return api.vendorBills(activeSession).then(setVendorBills);
+        case "users": return ["OWNER", "ADMIN", "OPERATIONS"].includes(userRole ?? "")
+          ? api.users(activeSession).then(setUsers)
+          : Promise.resolve();
+      }
+    })().then(() => { loadedScopes.current.add(scope); });
+    scopeRequests.current.set(scope, request);
+    void request.finally(() => {
+      if (scopeRequests.current.get(scope) === request) scopeRequests.current.delete(scope);
+    });
+    return request;
+  }, [userRole]);
+
+  const load = useCallback((force = false): Promise<void> => {
     const activeSession = sessionRef.current;
     if (!activeSession || !userId || !userRole) return Promise.resolve();
-    if (loadInFlight.current) return loadInFlight.current;
+    const requiredScopes = pageDataScopes[page];
+    if (!force && requiredScopes.every((scope) => loadedScopes.current.has(scope))) return Promise.resolve();
     setBusy(true);
     setError("");
-    const request = Promise.all([
-      api.masters(activeSession),
-      api.jobs(activeSession),
-      api.invoices(activeSession),
-      api.vendorBills(activeSession),
-      ["OWNER", "ADMIN", "OPERATIONS"].includes(userRole)
-        ? api.users(activeSession)
-        : Promise.resolve([]),
-    ])
-      .then(
-        ([nextMasters, nextJobs, nextInvoices, nextVendorBills, nextUsers]) => {
-          setMasters(nextMasters);
-          setJobs(nextJobs);
-          setInvoices(nextInvoices);
-          setVendorBills(nextVendorBills);
-          setSelectedJob((current) =>
-            current && nextJobs.some((job) => job.id === current.id)
-              ? current
-              : null,
-          );
-          setUsers(nextUsers);
-        },
-      )
+    return Promise.all(requiredScopes.map((scope) => requestScope(scope, activeSession, force)))
+      .then(() => undefined)
       .catch((reason: unknown) => setError(message(reason)))
-      .finally(() => {
-        setBusy(false);
-        loadInFlight.current = null;
-      });
-    loadInFlight.current = request;
-    return request;
-  }, [userId, userRole]);
+      .finally(() => setBusy(false));
+  }, [page, requestScope, userId, userRole]);
 
   async function refreshScopes(scopes: RefreshScope[]) {
     if (!session || !scopes.length) return;
-    const requests: Promise<void>[] = [];
-    if (scopes.includes("masters")) requests.push(api.masters(session).then(setMasters));
-    if (scopes.includes("jobs")) requests.push(api.jobs(session).then(setJobs));
-    if (scopes.includes("invoices")) requests.push(api.invoices(session).then(setInvoices));
-    if (scopes.includes("vendorBills")) requests.push(api.vendorBills(session).then(setVendorBills));
-    if (scopes.includes("users")) requests.push(api.users(session).then(setUsers));
     try {
-      await Promise.all(requests);
+      await Promise.all(scopes.map((scope) => requestScope(scope, session, true)));
     } catch (reason) {
       setError(message(reason));
     }
   }
+
+  useEffect(() => {
+    loadedScopes.current.clear();
+    scopeRequests.current.clear();
+    setMasters(null);
+    setJobs([]);
+    setInvoices([]);
+    setVendorBills([]);
+    setUsers([]);
+    setSelectedJob(null);
+    setSelectedInvoice(null);
+    setSelectedVendorBill(null);
+  }, [userId]);
 
   useEffect(() => {
     void load();
@@ -685,7 +732,7 @@ export function Workspace() {
                 <button className={record.section === "costs" ? "soft cost-back-button" : "soft"} onClick={() => { try { window.localStorage.removeItem(`transwave:${user.userId}:last-detail:${record.section}`); } catch {} goTo(page as NavigationPage); }}>← Back to {page.toLowerCase()}</button>
                 {record.section === "costs" && canManageBilling && (
                   <>
-                    <button className="soft" onClick={() => void load()}>Refresh</button>
+                    <button className="soft" onClick={() => void load(true)}>Refresh</button>
                     <button className="soft" onClick={() => { setEditingVendor(null); setDialog("vendor"); }}>+ Vendor</button>
                     <button className="button" onClick={openNewVendorInvoice}>+ Vendor invoice</button>
                   </>
@@ -700,7 +747,7 @@ export function Workspace() {
                 ← Back to costs
               </button>
             ) : (
-              <button className="soft" onClick={() => void load()}>
+              <button className="soft" onClick={() => void load(true)}>
                 Refresh
               </button>
             )}
@@ -757,6 +804,7 @@ export function Workspace() {
         )}
         {page === "Customers" && (
           <Customers
+            viewStateKey={`transwave:${user.userId}:customers`}
             customers={masters.customers}
             selectedId={record?.section === "customers" ? record.id : null}
             onOpen={(id) => router.push(`/customers/${encodeURIComponent(id)}`)}
@@ -769,6 +817,7 @@ export function Workspace() {
         )}
         {page === "Jobs" && (
           <Jobs
+            viewStateKey={`transwave:${user.userId}:jobs`}
             jobs={jobs}
             selected={record?.section === "jobs" ? selectedJob : null}
             canEdit={canManageOperations}
@@ -857,6 +906,7 @@ export function Workspace() {
           <Invoices
             viewStateKey={`transwave:${user.userId}:invoices`}
             invoices={invoices}
+            onLoadMore={(offset) => api.invoicePage(session, offset, 20)}
             selected={record?.section === "invoices" ? selectedInvoice : null}
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
@@ -941,6 +991,7 @@ export function Workspace() {
           <Costs
             viewStateKey={`transwave:${user.userId}:costs`}
             bills={vendorBills}
+            onLoadMore={(offset) => api.vendorBillPage(session, offset, 20)}
             invoices={invoices}
             vendors={masters.vendors}
             selected={record?.section === "costs"
@@ -1451,18 +1502,26 @@ function Dashboard({
   );
 }
 function Customers({
+  viewStateKey,
   customers,
   selectedId,
   onOpen,
   canEdit,
   onEdit,
 }: {
+  viewStateKey: string;
   customers: Customer[];
   selectedId: string | null;
   onOpen(id: string): void;
   canEdit: boolean;
   onEdit(c: Customer): void;
 }) {
+  const [pagination, setPagination] = usePersistedViewState(viewStateKey, { page: 1, pageSize: 10 });
+  const visibleCustomers = customers.slice((pagination.page - 1) * pagination.pageSize, pagination.page * pagination.pageSize);
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(customers.length / pagination.pageSize));
+    if (pagination.page > lastPage) setPagination((state) => ({ ...state, page: lastPage }));
+  }, [customers.length, pagination.page, pagination.pageSize, setPagination]);
   return (
     <>
     <div className={`customer-layout${selectedId ? " customer-detail-layout mobile-customer-detail" : " mobile-customer-list"}`}>
@@ -1470,6 +1529,7 @@ function Customers({
       title="Customer master"
       sub={`${customers.length} persisted billing profiles`}
     >
+      <ListPagination page={pagination.page} pageSize={pagination.pageSize} total={customers.length} onPage={(page) => setPagination((state) => ({ ...state, page }))} onPageSize={(pageSize) => setPagination((state) => ({ ...state, pageSize, page: 1 }))} />
       <div className="table customers">
         <div className="thead">
           <span>Customer / ID</span>
@@ -1478,7 +1538,7 @@ function Customers({
           <span>Terms</span>
           <span>Status</span>
         </div>
-        {customers.map((c) => (
+        {visibleCustomers.map((c) => (
           <button
             className="trow row-button"
             key={c.id}
@@ -1510,6 +1570,7 @@ function Customers({
 }
 
 function Jobs(props: {
+  viewStateKey: string;
   jobs: JobSummary[];
   selected: JobDetail | null;
   canEdit: boolean;
@@ -1527,11 +1588,18 @@ function Jobs(props: {
   detailOnly: boolean;
 }) {
   const { jobs, selected } = props;
+  const [pagination, setPagination] = usePersistedViewState(props.viewStateKey, { page: 1, pageSize: 10 });
+  const visibleJobs = jobs.slice((pagination.page - 1) * pagination.pageSize, pagination.page * pagination.pageSize);
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(jobs.length / pagination.pageSize));
+    if (pagination.page > lastPage) setPagination((state) => ({ ...state, page: lastPage }));
+  }, [jobs.length, pagination.page, pagination.pageSize, setPagination]);
   return (
     <div className={`${props.detailOnly ? "job-layout record-page" : "job-layout"}${props.selected && !props.detailOnly ? " mobile-job-detail" : !props.detailOnly ? " mobile-job-list" : ""}`}>
       {!props.detailOnly && <Panel title="Jobs" sub={`${jobs.length} persisted records`}>
+        <ListPagination page={pagination.page} pageSize={pagination.pageSize} total={jobs.length} onPage={(page) => setPagination((state) => ({ ...state, page }))} onPageSize={(pageSize) => setPagination((state) => ({ ...state, pageSize, page: 1 }))} />
         <div className="job-list">
-          {jobs.map((job) => (
+          {visibleJobs.map((job) => (
             <button
               className={selected?.id === job.id ? "job selected" : "job"}
               key={job.id}
@@ -1802,6 +1870,7 @@ function Jobs(props: {
 function Invoices({
   viewStateKey,
   invoices,
+  onLoadMore,
   selected,
   canIssue,
   canCreateSimilar,
@@ -1818,6 +1887,7 @@ function Invoices({
 }: {
   viewStateKey: string;
   invoices: Invoice[];
+  onLoadMore(offset: number): Promise<RecordPage<Invoice>>;
   selected: Invoice | null;
   canIssue: boolean;
   canCreateSimilar: boolean;
@@ -1833,19 +1903,73 @@ function Invoices({
   detailOnly: boolean;
 }) {
   const [filters, setFilters, filtersLoaded] = usePersistedViewState<InvoiceFilters>(viewStateKey, emptyInvoiceFilters);
+  const [additionalInvoices, setAdditionalInvoices] = useState<Invoice[]>([]);
+  const [loadedInvoiceCount, setLoadedInvoiceCount] = useState(Math.min(20, invoices.length));
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState("");
+  const [invoiceTotal, setInvoiceTotal] = useState(invoices.length);
+  const firstInvoicePageRequested = useRef(false);
+  const invoicePageRequestLock = useRef(false);
+  const loadMoreTarget = useRef<HTMLDivElement>(null);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentDate, setPaymentDate] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
   const [wideLayout, setWideLayout] = useState(false);
   const autoSelectedFirst = useRef(false);
-  const filteredInvoices = filterInvoices(invoices, filters);
+  const initialInvoices = invoices.slice(0, 20);
+  const initialInvoiceIds = new Set(initialInvoices.map((invoice) => invoice.id));
+  const loadedInvoices = [...initialInvoices, ...additionalInvoices.filter((invoice) => !initialInvoiceIds.has(invoice.id))];
+  const filteredInvoices = filterInvoices(loadedInvoices, filters);
+  useEffect(() => {
+    if (invoices.length) setInvoiceTotal((total) => Math.max(total, invoices.length));
+  }, [invoices.length]);
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
-  const customers = [...new Set(invoices.map((invoice) => invoice.customerName))].sort();
-  const loadingPorts = [...new Set(invoices.map((invoice) => invoice.polName))].sort();
-  const dischargePorts = [...new Set(invoices.map((invoice) => invoice.podName))].sort();
-  const updateFilter = <K extends keyof InvoiceFilters>(key: K, value: InvoiceFilters[K]) =>
+  const customers = [...new Set(loadedInvoices.map((invoice) => invoice.customerName))].sort();
+  const loadingPorts = [...new Set(loadedInvoices.map((invoice) => invoice.polName))].sort();
+  const dischargePorts = [...new Set(loadedInvoices.map((invoice) => invoice.podName))].sort();
+  const updateFilter = <K extends keyof InvoiceFilters>(key: K, value: InvoiceFilters[K]) => {
     setFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const loadNextInvoicePage = useCallback(async () => {
+    if (invoicePageRequestLock.current || loadingMore || (loadedInvoiceCount >= invoiceTotal && loadedInvoiceCount > 0)) return;
+    invoicePageRequestLock.current = true;
+    setLoadingMore(true);
+    setLoadMoreError("");
+    try {
+      const nextPage = await onLoadMore(loadedInvoiceCount);
+      setAdditionalInvoices((current) => {
+        const existing = new Set([...invoices.slice(0, 20), ...current].map((invoice) => invoice.id));
+        return [...current, ...nextPage.items.filter((invoice) => !existing.has(invoice.id))];
+      });
+      setLoadedInvoiceCount(Math.min(nextPage.total, loadedInvoiceCount + nextPage.items.length));
+      setInvoiceTotal(nextPage.total);
+    } catch {
+      setLoadMoreError("Could not load more invoices. Try again.");
+    } finally {
+      invoicePageRequestLock.current = false;
+      setLoadingMore(false);
+    }
+  }, [loadingMore, loadedInvoiceCount, invoiceTotal, onLoadMore, invoices]);
+
+  useEffect(() => {
+    if (invoices.length || firstInvoicePageRequested.current) return;
+    firstInvoicePageRequested.current = true;
+    void loadNextInvoicePage();
+  }, [invoices.length, loadNextInvoicePage]);
+
+  useEffect(() => {
+    const target = loadMoreTarget.current;
+    if (!target || typeof IntersectionObserver === "undefined" || loadedInvoiceCount >= invoiceTotal) return;
+    const scrollContainer = target.closest(".panel");
+    const root = scrollContainer && scrollContainer.scrollHeight > scrollContainer.clientHeight ? scrollContainer : null;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadNextInvoicePage();
+    }, { root, rootMargin: "0px 0px 240px 0px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loadedInvoiceCount, invoiceTotal, loadNextInvoicePage]);
 
   useEffect(() => {
     const mobile = window.matchMedia("(max-width: 760px)");
@@ -1879,7 +2003,7 @@ function Invoices({
     <div className={`${detailOnly ? "invoice-layout record-page" : "invoice-layout"}${selected && !detailOnly ? " mobile-invoice-detail" : !detailOnly ? " mobile-invoice-list" : ""}`}>
       {!detailOnly && <Panel
         title="Invoices"
-        sub={`${filteredInvoices.length} of ${invoices.length} records`}
+        sub={`${filteredInvoices.length} shown · ${loadedInvoiceCount} of ${invoiceTotal} loaded`}
       >
         <div className="invoice-filter-toolbar">
           <div>
@@ -1993,7 +2117,7 @@ function Invoices({
         <div className="invoice-results-heading" aria-live="polite">
           <div>
             <b>Matching invoices</b>
-            <span>{filteredInvoices.length} {filteredInvoices.length === 1 ? "invoice" : "invoices"} found</span>
+            <span>{filteredInvoices.length} shown · {loadedInvoiceCount} of {invoiceTotal} loaded</span>
           </div>
           <span className="invoice-results-count">{filteredInvoices.length}</span>
         </div>
@@ -2012,8 +2136,9 @@ function Invoices({
             </button>
           ))}
           {!filteredInvoices.length && (
-            <p className="empty-inline">No invoices match these filters.</p>
+            <p className="empty-inline">{loadingMore && loadedInvoiceCount === 0 ? "Loading invoices…" : "No loaded invoices match these filters yet."}</p>
           )}
+          <div ref={loadMoreTarget} className="list-load-more" aria-live="polite">{loadingMore ? "Loading more invoices…" : loadMoreError ? <button className="link-button" type="button" onClick={() => void loadNextInvoicePage()}>{loadMoreError}</button> : loadedInvoiceCount < invoiceTotal ? "Scroll to load more invoices" : "All invoices loaded"}</div>
         </div>
       </Panel>}
       {selected ? (
@@ -2215,16 +2340,26 @@ function Invoices({
   );
 }
 
-function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { viewStateKey: string; bills: VendorBill[]; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
-  const [viewState, setViewState] = usePersistedViewState(viewStateKey, {
+function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { viewStateKey: string; bills: VendorBill[]; onLoadMore(offset: number): Promise<RecordPage<VendorBill>>; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
+  const [viewState, setViewState, viewStateLoaded] = usePersistedViewState(viewStateKey, {
     listView: "invoices" as "invoices" | "vendors",
     vendorSearch: "", billSearch: "", billVendorFilter: "", billStatusFilter: "ALL",
-    paymentDateFrom: "", paymentDateTo: "",
+    paymentDateFrom: "", paymentDateTo: "", billPage: 1, vendorPage: 1, pageSize: 10,
   });
-  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo } = viewState;
+  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo, vendorPage, pageSize } = viewState;
   const updateViewState = <K extends keyof typeof viewState>(key: K, value: (typeof viewState)[K]) =>
-    setViewState((state) => ({ ...state, [key]: value }));
+    setViewState((state) => ({ ...state, [key]: value, ...((key === "billSearch" || key === "billVendorFilter" || key === "billStatusFilter" || key === "paymentDateFrom" || key === "paymentDateTo") ? { billPage: 1 } : {}), ...(key === "vendorSearch" ? { vendorPage: 1 } : {}) }));
   const [wideLayout, setWideLayout] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [additionalBills, setAdditionalBills] = useState<VendorBill[]>([]);
+  const [loadedBillCount, setLoadedBillCount] = useState(Math.min(20, bills.length));
+  const [billTotal, setBillTotal] = useState(bills.length);
+  const [loadingMoreBills, setLoadingMoreBills] = useState(false);
+  const [loadMoreBillsError, setLoadMoreBillsError] = useState("");
+  const [billSummary, setBillSummary] = useState<{ revenueAed: number; expenseAed: number } | null>(null);
+  const firstBillPageRequested = useRef(false);
+  const billPageRequestLock = useRef(false);
+  const billLoadMoreTarget = useRef<HTMLDivElement>(null);
   const autoSelectedFirst = useRef(false);
   const linkedCustomerInvoice = selected
     ? invoices.find((invoice) => invoice.id === selected.customerInvoiceId)
@@ -2235,10 +2370,15 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
   });
   const revenue = [...linkedIncome.values()].reduce((sum, value) => sum + value, 0);
   const expense = bills.reduce((sum, bill) => sum + Number(bill.subtotalAed), 0);
-  const profit = revenue - expense;
-  const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+  const displayRevenue = billSummary?.revenueAed ?? revenue;
+  const displayExpense = billSummary?.expenseAed ?? expense;
+  const profit = displayRevenue - displayExpense;
+  const margin = displayRevenue > 0 ? (profit / displayRevenue) * 100 : 0;
   const matchingVendors = vendors.filter((vendor) => `${vendor.name} ${vendor.code} ${vendor.trn || ""}`.toLowerCase().includes(vendorSearch.trim().toLowerCase()));
-  const matchingBills = bills.filter((bill) => {
+  const initialBills = bills.slice(0, 20);
+  const initialBillIds = new Set(initialBills.map((bill) => bill.id));
+  const loadedBills = [...initialBills, ...additionalBills.filter((bill) => !initialBillIds.has(bill.id))];
+  const matchingBills = loadedBills.filter((bill) => {
     const linkedInvoice = invoices.find((invoice) => invoice.id === bill.customerInvoiceId);
     const searchable = [
       bill.vendorInvoiceNumber,
@@ -2266,6 +2406,59 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
     if (paymentDateTo && (!bill.paymentDate || bill.paymentDate > paymentDateTo)) return false;
     return true;
   });
+  const visibleBills = matchingBills;
+  const visibleVendors = matchingVendors.slice((vendorPage - 1) * pageSize, vendorPage * pageSize);
+  useEffect(() => {
+    const lastVendorPage = Math.max(1, Math.ceil(matchingVendors.length / pageSize));
+    if (vendorPage > lastVendorPage) setViewState((state) => ({ ...state, vendorPage: Math.min(state.vendorPage, lastVendorPage) }));
+  }, [matchingVendors.length, pageSize, vendorPage, setViewState]);
+
+  useEffect(() => {
+    if (bills.length) {
+      setBillTotal(bills.length);
+      setBillSummary(null);
+    }
+  }, [bills.length]);
+
+  const loadNextBillPage = useCallback(async () => {
+    if (billPageRequestLock.current || loadingMoreBills || (loadedBillCount >= billTotal && loadedBillCount > 0)) return;
+    billPageRequestLock.current = true;
+    setLoadingMoreBills(true);
+    setLoadMoreBillsError("");
+    try {
+      const nextPage = await onLoadMore(loadedBillCount);
+      setAdditionalBills((current) => {
+        const existing = new Set([...bills.slice(0, 20), ...current].map((bill) => bill.id));
+        return [...current, ...nextPage.items.filter((bill) => !existing.has(bill.id))];
+      });
+      setLoadedBillCount(Math.min(nextPage.total, loadedBillCount + nextPage.items.length));
+      setBillTotal(nextPage.total);
+      if (nextPage.summary) setBillSummary(nextPage.summary);
+    } catch {
+      setLoadMoreBillsError("Could not load more vendor invoices. Try again.");
+    } finally {
+      billPageRequestLock.current = false;
+      setLoadingMoreBills(false);
+    }
+  }, [loadingMoreBills, loadedBillCount, billTotal, onLoadMore, bills]);
+
+  useEffect(() => {
+    if (!viewStateLoaded || bills.length || firstBillPageRequested.current || listView !== "invoices") return;
+    firstBillPageRequested.current = true;
+    void loadNextBillPage();
+  }, [viewStateLoaded, bills.length, listView, loadNextBillPage]);
+
+  useEffect(() => {
+    const target = billLoadMoreTarget.current;
+    if (!target || typeof IntersectionObserver === "undefined" || loadedBillCount >= billTotal || listView !== "invoices") return;
+    const scrollContainer = target.closest(".panel");
+    const root = scrollContainer && scrollContainer.scrollHeight > scrollContainer.clientHeight ? scrollContainer : null;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadNextBillPage();
+    }, { root, rootMargin: "0px 0px 240px 0px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loadedBillCount, billTotal, listView, loadNextBillPage]);
 
   useEffect(() => {
     const wide = window.matchMedia("(min-width: 761px)");
@@ -2274,6 +2467,8 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
     wide.addEventListener("change", syncLayout);
     return () => wide.removeEventListener("change", syncLayout);
   }, []);
+
+  useEffect(() => setFiltersOpen(wideLayout), [wideLayout]);
 
   useEffect(() => {
     if (routeId) {
@@ -2285,27 +2480,31 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
       return;
     }
     if (!wideLayout || detailOnly || listView !== "invoices" || autoSelectedFirst.current) return;
-    const firstBill = matchingBills[0];
+    const firstBill = visibleBills[0];
     if (!firstBill) return;
     autoSelectedFirst.current = true;
     onOpen(firstBill.id);
-  }, [wideLayout, detailOnly, selected, routeId, listView, bills, matchingBills, onOpen]);
+  }, [wideLayout, detailOnly, selected, routeId, listView, visibleBills, onOpen]);
 
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
     {!detailOnly && <div className="metrics cost-metrics">
-      <Metric label="Allocated income" value={money.format(revenue)} note="Customer revenue before VAT" />
-      <Metric label="Vendor expense" value={money.format(expense)} note="Vendor cost before VAT" />
+      <Metric label="Allocated income" value={money.format(displayRevenue)} note="Customer revenue before VAT" />
+      <Metric label="Vendor expense" value={money.format(displayExpense)} note="Vendor cost before VAT" />
       <Metric label="Gross profit" value={money.format(profit)} note="Income minus vendor expense" good={profit >= 0} />
       <Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0} />
     </div>}
     <div className={`${detailOnly ? "cost-layout record-page" : "cost-layout"}${selected && !detailOnly ? " mobile-cost-detail-layout" : !detailOnly ? " mobile-cost-list-layout" : ""}`}>
-      {!detailOnly && <Panel title={listView === "invoices" ? "Vendor invoices" : "Vendor master"} sub={listView === "invoices" ? `${matchingBills.length} of ${bills.length} vendor invoice${bills.length === 1 ? "" : "s"}` : `${vendors.length} shipping and service vendor${vendors.length === 1 ? "" : "s"}`}>
+      {!detailOnly && <Panel title={listView === "invoices" ? "Vendor invoices" : "Vendor master"} sub={listView === "invoices" ? `${matchingBills.length} shown · ${loadedBillCount} of ${billTotal} vendor invoices loaded` : `${vendors.length} shipping and service vendor${vendors.length === 1 ? "" : "s"}`}>
         <div className="cost-list-switcher" role="tablist" aria-label="Costs lists">
-          <button type="button" role="tab" aria-selected={listView === "invoices"} className={listView === "invoices" ? "active" : ""} onClick={() => updateViewState("listView", "invoices")}>Invoices <span>{bills.length}</span></button>
+          <button type="button" role="tab" aria-selected={listView === "invoices"} className={listView === "invoices" ? "active" : ""} onClick={() => updateViewState("listView", "invoices")}>Invoices <span>{billTotal}</span></button>
           <button type="button" role="tab" aria-selected={listView === "vendors"} className={listView === "vendors" ? "active" : ""} onClick={() => updateViewState("listView", "vendors")}>Vendors <span>{vendors.length}</span></button>
         </div>
         {listView === "invoices" ? <>
-          <div className="vendor-invoice-filters">
+          <div className="invoice-filter-toolbar vendor-filter-toolbar">
+            <div><b>Vendor invoice filters</b><span>{matchingBills.length} shown · {loadedBillCount} of {billTotal} loaded</span></div>
+            <button className="soft compact" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>{filtersOpen ? "Hide filters" : "Show filters"}</button>
+          </div>
+          {filtersOpen && <div className="vendor-invoice-filters">
             <Field label="Search vendor invoices"><input type="search" value={billSearch} onChange={(event) => updateViewState("billSearch", event.target.value)} placeholder="Invoice no., file name, B/L, job, vendor, vessel…" /></Field>
             <div className="vendor-invoice-filter-grid">
               <Field label="Vendor"><select value={billVendorFilter} onChange={(event) => updateViewState("billVendorFilter", event.target.value)}><option value="">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
@@ -2313,13 +2512,16 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
               <Field label="Paid from"><input type="date" value={paymentDateFrom} onChange={(event) => updateViewState("paymentDateFrom", event.target.value)} /></Field>
               <Field label="Paid to"><input type="date" value={paymentDateTo} onChange={(event) => updateViewState("paymentDateTo", event.target.value)} /></Field>
             </div>
-          </div>
-          <div className="invoice-list">{matchingBills.length ? matchingBills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { updateViewState("listView", "invoices"); onOpen(bill.id); }}>
+          </div>}
+          <div className="invoice-list">{matchingBills.length ? visibleBills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { updateViewState("listView", "invoices"); onOpen(bill.id); }}>
             <b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span>{(bill.blNumber || bill.sourceFileName) && <small>{[bill.blNumber && `B/L ${bill.blNumber}`, bill.sourceFileName].filter(Boolean).join(" · ")}</small>}<Tag text={vendorBillStatusLabel(bill.status)} /><strong>{money.format(Number(bill.totalAmountAed))}</strong>
-          </button>) : <p className="empty-inline">No vendor invoices match these filters.</p>}</div>
+          </button>) : <p className="empty-inline">{loadingMoreBills && loadedBillCount === 0 ? "Loading vendor invoices…" : "No loaded vendor invoices match these filters yet."}</p>}
+            <div ref={billLoadMoreTarget} className="list-load-more" aria-live="polite">{loadingMoreBills ? "Loading more vendor invoices…" : loadMoreBillsError ? <button className="link-button" type="button" onClick={() => void loadNextBillPage()}>{loadMoreBillsError}</button> : loadedBillCount < billTotal ? "Scroll to load more vendor invoices" : "All vendor invoices loaded"}</div>
+          </div>
         </> : <div className="cost-vendor-directory">
           <label className="cost-vendor-search">Search vendors<input type="search" value={vendorSearch} onChange={(event) => updateViewState("vendorSearch", event.target.value)} placeholder="Name, vendor code, or TRN" /></label>
-          <div className="record-list">{matchingVendors.length ? matchingVendors.map((vendor) => <div key={vendor.id}>
+          <ListPagination page={vendorPage} pageSize={pageSize} total={matchingVendors.length} onPage={(page) => updateViewState("vendorPage", page)} onPageSize={(size) => { updateViewState("pageSize", size); updateViewState("vendorPage", 1); }} />
+          <div className="record-list">{matchingVendors.length ? visibleVendors.map((vendor) => <div key={vendor.id}>
             <span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn || "No TRN"}</small></span>
             <Tag text={vendor.active ? "ACTIVE" : "INACTIVE"} />
             {canEdit && <button className="link-button" onClick={() => onVendor(vendor)}>Edit</button>}
