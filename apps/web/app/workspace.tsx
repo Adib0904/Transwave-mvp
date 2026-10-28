@@ -2291,6 +2291,7 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
   const updateViewState = <K extends keyof typeof viewState>(key: K, value: (typeof viewState)[K]) =>
     setViewState((state) => ({ ...state, [key]: value, ...((key === "billSearch" || key === "billVendorFilter" || key === "billStatusFilter" || key === "paymentDateFrom" || key === "paymentDateTo") ? { billPage: 1 } : {}), ...(key === "vendorSearch" ? { vendorPage: 1 } : {}) }));
   const [wideLayout, setWideLayout] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const autoSelectedFirst = useRef(false);
   const linkedCustomerInvoice = selected
     ? invoices.find((invoice) => invoice.id === selected.customerInvoiceId)
@@ -2348,6 +2349,8 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
     return () => wide.removeEventListener("change", syncLayout);
   }, []);
 
+  useEffect(() => setFiltersOpen(wideLayout), [wideLayout]);
+
   useEffect(() => {
     if (routeId) {
       autoSelectedFirst.current = true;
@@ -2378,7 +2381,11 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
           <button type="button" role="tab" aria-selected={listView === "vendors"} className={listView === "vendors" ? "active" : ""} onClick={() => updateViewState("listView", "vendors")}>Vendors <span>{vendors.length}</span></button>
         </div>
         {listView === "invoices" ? <>
-          <div className="vendor-invoice-filters">
+          <div className="invoice-filter-toolbar vendor-filter-toolbar">
+            <div><b>Vendor invoice filters</b><span>{matchingBills.length} matching {matchingBills.length === 1 ? "invoice" : "invoices"}</span></div>
+            <button className="soft compact" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}>{filtersOpen ? "Hide filters" : "Show filters"}</button>
+          </div>
+          {filtersOpen && <div className="vendor-invoice-filters">
             <Field label="Search vendor invoices"><input type="search" value={billSearch} onChange={(event) => updateViewState("billSearch", event.target.value)} placeholder="Invoice no., file name, B/L, job, vendor, vessel…" /></Field>
             <div className="vendor-invoice-filter-grid">
               <Field label="Vendor"><select value={billVendorFilter} onChange={(event) => updateViewState("billVendorFilter", event.target.value)}><option value="">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></Field>
@@ -2386,7 +2393,7 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
               <Field label="Paid from"><input type="date" value={paymentDateFrom} onChange={(event) => updateViewState("paymentDateFrom", event.target.value)} /></Field>
               <Field label="Paid to"><input type="date" value={paymentDateTo} onChange={(event) => updateViewState("paymentDateTo", event.target.value)} /></Field>
             </div>
-          </div>
+          </div>}
           <ListPagination page={billPage} pageSize={pageSize} total={matchingBills.length} onPage={(page) => updateViewState("billPage", page)} onPageSize={(size) => { updateViewState("pageSize", size); updateViewState("billPage", 1); }} />
           <div className="invoice-list">{matchingBills.length ? visibleBills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { updateViewState("listView", "invoices"); onOpen(bill.id); }}>
             <b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span>{(bill.blNumber || bill.sourceFileName) && <small>{[bill.blNumber && `B/L ${bill.blNumber}`, bill.sourceFileName].filter(Boolean).join(" · ")}</small>}<Tag text={vendorBillStatusLabel(bill.status)} /><strong>{money.format(Number(bill.totalAmountAed))}</strong>
