@@ -147,7 +147,15 @@ function usePersistedViewState<T>(key: string, initialValue: T) {
     setLoaded(false);
     try {
       const stored = window.localStorage.getItem(key);
-      setValue(stored ? JSON.parse(stored) as T : initialValue);
+      const parsed = stored ? JSON.parse(stored) as unknown : initialValue;
+      if (
+        parsed && typeof parsed === "object" && !Array.isArray(parsed) &&
+        initialValue && typeof initialValue === "object" && !Array.isArray(initialValue)
+      ) {
+        setValue({ ...initialValue, ...parsed } as T);
+      } else {
+        setValue(parsed as T);
+      }
     } catch {
       setValue(initialValue);
     }
