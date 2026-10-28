@@ -752,6 +752,7 @@ export type SaveJob = z.infer<typeof saveJobSchema>;
 export type SaveContainer = z.infer<typeof saveContainerSchema>;
 export type CreateDraft = z.infer<typeof createDraftSchema>;
 export type Invoice = z.infer<typeof invoiceSchema>;
+export type RecordPage<T> = { items: T[]; total: number; offset: number; limit: number; hasMore: boolean; summary?: { revenueAed: number; expenseAed: number } };
 export type UpdateInvoice = z.infer<typeof updateInvoiceSchema>;
 export type MarkInvoicePaid = z.infer<typeof markInvoicePaidSchema>;
 export type VendorBill = z.infer<typeof vendorBillSchema>;

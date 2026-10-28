@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { AttachVendorDocument, SaveVendorBill, VendorBill } from "@transwave/contracts";
+import type { AttachVendorDocument, RecordPage, SaveVendorBill, VendorBill } from "@transwave/contracts";
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
@@ -23,6 +23,48 @@ export class VendorBillsService {
       .order("bill_date", { ascending: false });
     if (result.error) throwDatabaseError(result.error);
     const bills = result.data ?? [];
+    return this.enrich(database, bills);
+  }
+
+  async listPage(database: TransWaveDatabaseClient, offset: number, limit: number): Promise<RecordPage<VendorBill>> {
+    const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+    const safeLimit = Number.isFinite(limit) ? Math.min(100, Math.max(1, Math.floor(limit))) : 20;
+    const visibleJobs = await database.from("jobs").select("id");
+    if (visibleJobs.error) throwDatabaseError(visibleJobs.error);
+    const visibleJobIds = (visibleJobs.data ?? []).map((job) => job.id);
+    if (visibleJobIds.length === 0) return { items: [], total: 0, offset: safeOffset, limit: safeLimit, hasMore: false };
+    const [result, totalsResult] = await Promise.all([
+      database.from("vendor_bills").select("*", { count: "exact" })
+        .in("job_id", visibleJobIds).order("bill_date", { ascending: false })
+        .range(safeOffset, safeOffset + safeLimit - 1),
+      database.from("vendor_bills").select("id, customer_invoice_id").in("job_id", visibleJobIds),
+    ]);
+    if (result.error) throwDatabaseError(result.error);
+    if (totalsResult.error) throwDatabaseError(totalsResult.error);
+    const items = await this.enrich(database, result.data ?? []);
+    const total = result.count ?? items.length;
+    const allBillIds = (totalsResult.data ?? []).map((bill) => bill.id);
+    const invoiceIds = [...new Set((totalsResult.data ?? []).map((bill) => bill.customer_invoice_id).filter((id): id is string => Boolean(id)))];
+    const [linesResult, invoicesResult] = await Promise.all([
+      allBillIds.length ? database.from("vendor_bill_lines").select("net_amount_aed").in("vendor_bill_id", allBillIds) : Promise.resolve({ data: [], error: null }),
+      invoiceIds.length ? database.from("invoices").select("id, subtotal_aed").in("id", invoiceIds) : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (linesResult.error) throwDatabaseError(linesResult.error);
+    if (invoicesResult.error) throwDatabaseError(invoicesResult.error);
+    return {
+      items,
+      total,
+      offset: safeOffset,
+      limit: safeLimit,
+      hasMore: safeOffset + items.length < total,
+      summary: {
+        revenueAed: (invoicesResult.data ?? []).reduce((sum, invoice) => sum + Number(invoice.subtotal_aed ?? 0), 0),
+        expenseAed: (linesResult.data ?? []).reduce((sum, line) => sum + Number(line.net_amount_aed ?? 0), 0),
+      },
+    };
+  }
+
+  private async enrich(database: TransWaveDatabaseClient, bills: BillRow[]): Promise<VendorBill[]> {
     if (!bills.length) return [];
 
     const billIds = bills.map((bill) => bill.id);

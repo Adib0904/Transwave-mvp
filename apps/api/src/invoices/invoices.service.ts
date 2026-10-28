@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { containerSchema, type Invoice, type UpdateInvoice } from "@transwave/contracts";
+import { containerSchema, type Invoice, type RecordPage, type UpdateInvoice } from "@transwave/contracts";
 import type { Database, Json, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
@@ -22,7 +22,26 @@ export class InvoicesService {
     }
     const { data: invoices, error } = await query;
     if (error) throwDatabaseError(error);
-    if (!invoices?.length) return [];
+    return this.withLines(database, invoices ?? []);
+  }
+
+  async listPage(database: TransWaveDatabaseClient, userId: string, offset: number, limit: number): Promise<RecordPage<Invoice>> {
+    const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+    const safeLimit = Number.isFinite(limit) ? Math.min(100, Math.max(1, Math.floor(limit))) : 20;
+    const tenant = await resolveTenant(database, userId);
+    let query = database.from("invoices").select("*", { count: "exact" })
+      .eq("company_id", tenant.companyId).order("created_at", { ascending: false})
+      .range(safeOffset, safeOffset + safeLimit - 1);
+    if (tenant.role !== "OWNER" && tenant.role !== "ADMIN") query = query.eq("created_by", userId);
+    const { data, error, count } = await query;
+    if (error) throwDatabaseError(error);
+    const items = await this.withLines(database, data ?? []);
+    const total = count ?? items.length;
+    return { items, total, offset: safeOffset, limit: safeLimit, hasMore: safeOffset + items.length < total };
+  }
+
+  private async withLines(database: TransWaveDatabaseClient, invoices: InvoiceRow[]): Promise<Invoice[]> {
+    if (!invoices.length) return [];
 
     const { data: lines, error: linesError } = await database
       .from("invoice_lines")
