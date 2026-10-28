@@ -78,6 +78,18 @@ type Dialog =
   | null;
 type AssignedService = JobDetail["services"][number];
 type RefreshScope = "masters" | "jobs" | "invoices" | "vendorBills" | "users";
+const pageDataScopes: Record<Page, RefreshScope[]> = {
+  Dashboard: ["masters", "jobs", "invoices"],
+  Customers: ["masters"],
+  Jobs: ["masters", "jobs"],
+  Invoices: ["masters", "invoices"],
+  Costs: ["masters", "jobs", "invoices", "vendorBills"],
+  Masters: ["masters"],
+  Users: ["masters", "users"],
+  Activity: ["masters", "users"],
+  "New Job": ["masters"],
+  "New Vendor Invoice": ["masters", "jobs", "invoices", "vendorBills"],
+};
 type Confirmation = {
   title: string;
   message: string;
@@ -150,6 +162,24 @@ function usePersistedViewState<T>(key: string, initialValue: T) {
     }
   }, [key, loaded, value]);
   return [value, setValue, loaded] as const;
+}
+
+function ListPagination({ page, pageSize, total, onPage, onPageSize }: { page: number; pageSize: number; total: number; onPage(page: number): void; onPageSize(size: number): void }) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const visiblePages = Array.from({ length: Math.min(5, pageCount) }, (_, index) => {
+    const start = Math.max(1, Math.min(page - 2, pageCount - 4));
+    return start + index;
+  });
+  if (total <= 10) return null;
+  return <div className="activity-pagination list-pagination">
+    <label className="activity-page-size">Rows per page<select value={pageSize} onChange={(event) => onPageSize(Number(event.target.value))}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select></label>
+    <span>{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}</span>
+    <div className="activity-page-buttons">
+      <button className="soft compact" type="button" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button>
+      {visiblePages.map((number) => <button key={number} className={number === page ? "activity-page-current" : "soft compact"} type="button" aria-current={number === page ? "page" : undefined} onClick={() => onPage(number)}>{number}</button>)}
+      <button className="soft compact" type="button" disabled={page >= pageCount} onClick={() => onPage(page + 1)}>Next</button>
+    </div>
+  </div>;
 }
 
 const recordRoute = (pathname: string) => {
@@ -236,7 +266,8 @@ export function Workspace() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
-  const loadInFlight = useRef<Promise<void> | null>(null);
+  const loadedScopes = useRef(new Set<RefreshScope>());
+  const scopeRequests = useRef(new Map<RefreshScope, Promise<void>>());
   const canManageOperations = ["OWNER", "ADMIN", "OPERATIONS"].includes(
     user?.role ?? "VIEWER",
   );
@@ -265,58 +296,65 @@ export function Workspace() {
                 ? "Users"
                 : null;
 
-  const load = useCallback((): Promise<void> => {
+  const requestScope = useCallback((scope: RefreshScope, activeSession: Session, force = false): Promise<void> => {
+    if (!force && loadedScopes.current.has(scope)) return Promise.resolve();
+    const pending = scopeRequests.current.get(scope);
+    if (pending) return pending;
+    const request = (() => {
+      switch (scope) {
+        case "masters": return api.masters(activeSession).then(setMasters);
+        case "jobs": return api.jobs(activeSession).then((nextJobs) => {
+          setJobs(nextJobs);
+          setSelectedJob((current) => current && nextJobs.some((job) => job.id === current.id) ? current : null);
+        });
+        case "invoices": return api.invoices(activeSession).then(setInvoices);
+        case "vendorBills": return api.vendorBills(activeSession).then(setVendorBills);
+        case "users": return ["OWNER", "ADMIN", "OPERATIONS"].includes(userRole ?? "")
+          ? api.users(activeSession).then(setUsers)
+          : Promise.resolve();
+      }
+    })().then(() => { loadedScopes.current.add(scope); });
+    scopeRequests.current.set(scope, request);
+    void request.finally(() => {
+      if (scopeRequests.current.get(scope) === request) scopeRequests.current.delete(scope);
+    });
+    return request;
+  }, [userRole]);
+
+  const load = useCallback((force = false): Promise<void> => {
     const activeSession = sessionRef.current;
     if (!activeSession || !userId || !userRole) return Promise.resolve();
-    if (loadInFlight.current) return loadInFlight.current;
+    const requiredScopes = pageDataScopes[page];
+    if (!force && requiredScopes.every((scope) => loadedScopes.current.has(scope))) return Promise.resolve();
     setBusy(true);
     setError("");
-    const request = Promise.all([
-      api.masters(activeSession),
-      api.jobs(activeSession),
-      api.invoices(activeSession),
-      api.vendorBills(activeSession),
-      ["OWNER", "ADMIN", "OPERATIONS"].includes(userRole)
-        ? api.users(activeSession)
-        : Promise.resolve([]),
-    ])
-      .then(
-        ([nextMasters, nextJobs, nextInvoices, nextVendorBills, nextUsers]) => {
-          setMasters(nextMasters);
-          setJobs(nextJobs);
-          setInvoices(nextInvoices);
-          setVendorBills(nextVendorBills);
-          setSelectedJob((current) =>
-            current && nextJobs.some((job) => job.id === current.id)
-              ? current
-              : null,
-          );
-          setUsers(nextUsers);
-        },
-      )
+    return Promise.all(requiredScopes.map((scope) => requestScope(scope, activeSession, force)))
+      .then(() => undefined)
       .catch((reason: unknown) => setError(message(reason)))
-      .finally(() => {
-        setBusy(false);
-        loadInFlight.current = null;
-      });
-    loadInFlight.current = request;
-    return request;
-  }, [userId, userRole]);
+      .finally(() => setBusy(false));
+  }, [page, requestScope, userId, userRole]);
 
   async function refreshScopes(scopes: RefreshScope[]) {
     if (!session || !scopes.length) return;
-    const requests: Promise<void>[] = [];
-    if (scopes.includes("masters")) requests.push(api.masters(session).then(setMasters));
-    if (scopes.includes("jobs")) requests.push(api.jobs(session).then(setJobs));
-    if (scopes.includes("invoices")) requests.push(api.invoices(session).then(setInvoices));
-    if (scopes.includes("vendorBills")) requests.push(api.vendorBills(session).then(setVendorBills));
-    if (scopes.includes("users")) requests.push(api.users(session).then(setUsers));
     try {
-      await Promise.all(requests);
+      await Promise.all(scopes.map((scope) => requestScope(scope, session, true)));
     } catch (reason) {
       setError(message(reason));
     }
   }
+
+  useEffect(() => {
+    loadedScopes.current.clear();
+    scopeRequests.current.clear();
+    setMasters(null);
+    setJobs([]);
+    setInvoices([]);
+    setVendorBills([]);
+    setUsers([]);
+    setSelectedJob(null);
+    setSelectedInvoice(null);
+    setSelectedVendorBill(null);
+  }, [userId]);
 
   useEffect(() => {
     void load();
@@ -685,7 +723,7 @@ export function Workspace() {
                 <button className={record.section === "costs" ? "soft cost-back-button" : "soft"} onClick={() => { try { window.localStorage.removeItem(`transwave:${user.userId}:last-detail:${record.section}`); } catch {} goTo(page as NavigationPage); }}>← Back to {page.toLowerCase()}</button>
                 {record.section === "costs" && canManageBilling && (
                   <>
-                    <button className="soft" onClick={() => void load()}>Refresh</button>
+                    <button className="soft" onClick={() => void load(true)}>Refresh</button>
                     <button className="soft" onClick={() => { setEditingVendor(null); setDialog("vendor"); }}>+ Vendor</button>
                     <button className="button" onClick={openNewVendorInvoice}>+ Vendor invoice</button>
                   </>
@@ -700,7 +738,7 @@ export function Workspace() {
                 ← Back to costs
               </button>
             ) : (
-              <button className="soft" onClick={() => void load()}>
+              <button className="soft" onClick={() => void load(true)}>
                 Refresh
               </button>
             )}
@@ -757,6 +795,7 @@ export function Workspace() {
         )}
         {page === "Customers" && (
           <Customers
+            viewStateKey={`transwave:${user.userId}:customers`}
             customers={masters.customers}
             selectedId={record?.section === "customers" ? record.id : null}
             onOpen={(id) => router.push(`/customers/${encodeURIComponent(id)}`)}
@@ -769,6 +808,7 @@ export function Workspace() {
         )}
         {page === "Jobs" && (
           <Jobs
+            viewStateKey={`transwave:${user.userId}:jobs`}
             jobs={jobs}
             selected={record?.section === "jobs" ? selectedJob : null}
             canEdit={canManageOperations}
@@ -1451,18 +1491,26 @@ function Dashboard({
   );
 }
 function Customers({
+  viewStateKey,
   customers,
   selectedId,
   onOpen,
   canEdit,
   onEdit,
 }: {
+  viewStateKey: string;
   customers: Customer[];
   selectedId: string | null;
   onOpen(id: string): void;
   canEdit: boolean;
   onEdit(c: Customer): void;
 }) {
+  const [pagination, setPagination] = usePersistedViewState(viewStateKey, { page: 1, pageSize: 10 });
+  const visibleCustomers = customers.slice((pagination.page - 1) * pagination.pageSize, pagination.page * pagination.pageSize);
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(customers.length / pagination.pageSize));
+    if (pagination.page > lastPage) setPagination((state) => ({ ...state, page: lastPage }));
+  }, [customers.length, pagination.page, pagination.pageSize, setPagination]);
   return (
     <>
     <div className={`customer-layout${selectedId ? " customer-detail-layout mobile-customer-detail" : " mobile-customer-list"}`}>
@@ -1470,6 +1518,7 @@ function Customers({
       title="Customer master"
       sub={`${customers.length} persisted billing profiles`}
     >
+      <ListPagination page={pagination.page} pageSize={pagination.pageSize} total={customers.length} onPage={(page) => setPagination((state) => ({ ...state, page }))} onPageSize={(pageSize) => setPagination((state) => ({ ...state, pageSize, page: 1 }))} />
       <div className="table customers">
         <div className="thead">
           <span>Customer / ID</span>
@@ -1478,7 +1527,7 @@ function Customers({
           <span>Terms</span>
           <span>Status</span>
         </div>
-        {customers.map((c) => (
+        {visibleCustomers.map((c) => (
           <button
             className="trow row-button"
             key={c.id}
@@ -1510,6 +1559,7 @@ function Customers({
 }
 
 function Jobs(props: {
+  viewStateKey: string;
   jobs: JobSummary[];
   selected: JobDetail | null;
   canEdit: boolean;
@@ -1527,11 +1577,18 @@ function Jobs(props: {
   detailOnly: boolean;
 }) {
   const { jobs, selected } = props;
+  const [pagination, setPagination] = usePersistedViewState(props.viewStateKey, { page: 1, pageSize: 10 });
+  const visibleJobs = jobs.slice((pagination.page - 1) * pagination.pageSize, pagination.page * pagination.pageSize);
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(jobs.length / pagination.pageSize));
+    if (pagination.page > lastPage) setPagination((state) => ({ ...state, page: lastPage }));
+  }, [jobs.length, pagination.page, pagination.pageSize, setPagination]);
   return (
     <div className={`${props.detailOnly ? "job-layout record-page" : "job-layout"}${props.selected && !props.detailOnly ? " mobile-job-detail" : !props.detailOnly ? " mobile-job-list" : ""}`}>
       {!props.detailOnly && <Panel title="Jobs" sub={`${jobs.length} persisted records`}>
+        <ListPagination page={pagination.page} pageSize={pagination.pageSize} total={jobs.length} onPage={(page) => setPagination((state) => ({ ...state, page }))} onPageSize={(pageSize) => setPagination((state) => ({ ...state, pageSize, page: 1 }))} />
         <div className="job-list">
-          {jobs.map((job) => (
+          {visibleJobs.map((job) => (
             <button
               className={selected?.id === job.id ? "job selected" : "job"}
               key={job.id}
@@ -1833,6 +1890,7 @@ function Invoices({
   detailOnly: boolean;
 }) {
   const [filters, setFilters, filtersLoaded] = usePersistedViewState<InvoiceFilters>(viewStateKey, emptyInvoiceFilters);
+  const [pagination, setPagination] = usePersistedViewState(`${viewStateKey}:pagination`, { page: 1, pageSize: 10 });
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentDate, setPaymentDate] = useState("");
@@ -1840,12 +1898,19 @@ function Invoices({
   const [wideLayout, setWideLayout] = useState(false);
   const autoSelectedFirst = useRef(false);
   const filteredInvoices = filterInvoices(invoices, filters);
+  const visibleInvoices = filteredInvoices.slice((pagination.page - 1) * pagination.pageSize, pagination.page * pagination.pageSize);
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(filteredInvoices.length / pagination.pageSize));
+    if (pagination.page > lastPage) setPagination((state) => ({ ...state, page: lastPage }));
+  }, [filteredInvoices.length, pagination.page, pagination.pageSize, setPagination]);
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const customers = [...new Set(invoices.map((invoice) => invoice.customerName))].sort();
   const loadingPorts = [...new Set(invoices.map((invoice) => invoice.polName))].sort();
   const dischargePorts = [...new Set(invoices.map((invoice) => invoice.podName))].sort();
-  const updateFilter = <K extends keyof InvoiceFilters>(key: K, value: InvoiceFilters[K]) =>
+  const updateFilter = <K extends keyof InvoiceFilters>(key: K, value: InvoiceFilters[K]) => {
+    setPagination((current) => ({ ...current, page: 1 }));
     setFilters((current) => ({ ...current, [key]: value }));
+  };
 
   useEffect(() => {
     const mobile = window.matchMedia("(max-width: 760px)");
@@ -1869,11 +1934,11 @@ function Invoices({
       return;
     }
     if (!filtersLoaded || !wideLayout || detailOnly || autoSelectedFirst.current) return;
-    const firstInvoice = filteredInvoices[0];
+    const firstInvoice = visibleInvoices[0];
     if (!firstInvoice) return;
     autoSelectedFirst.current = true;
     onOpen(firstInvoice.id);
-  }, [filtersLoaded, wideLayout, detailOnly, selected, filteredInvoices, onOpen]);
+  }, [filtersLoaded, wideLayout, detailOnly, selected, visibleInvoices, onOpen]);
 
   return (
     <div className={`${detailOnly ? "invoice-layout record-page" : "invoice-layout"}${selected && !detailOnly ? " mobile-invoice-detail" : !detailOnly ? " mobile-invoice-list" : ""}`}>
@@ -1900,7 +1965,7 @@ function Invoices({
           <div className="invoice-filter-heading">
             <b>Filter invoices</b>
             {hasInvoiceFilters(filters) && (
-              <button type="button" onClick={() => setFilters(emptyInvoiceFilters)}>
+              <button type="button" onClick={() => { setFilters(emptyInvoiceFilters); setPagination((current) => ({ ...current, page: 1 })); }}>
                 Clear all
               </button>
             )}
@@ -1997,8 +2062,9 @@ function Invoices({
           </div>
           <span className="invoice-results-count">{filteredInvoices.length}</span>
         </div>
+        <ListPagination page={pagination.page} pageSize={pagination.pageSize} total={filteredInvoices.length} onPage={(page) => setPagination((state) => ({ ...state, page }))} onPageSize={(pageSize) => setPagination((state) => ({ ...state, pageSize, page: 1 }))} />
         <div className="invoice-list">
-          {filteredInvoices.map((i) => (
+          {visibleInvoices.map((i) => (
             <button
               className={selected?.id === i.id ? "invoice selected" : "invoice"}
               key={i.id}
@@ -2219,11 +2285,11 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
   const [viewState, setViewState] = usePersistedViewState(viewStateKey, {
     listView: "invoices" as "invoices" | "vendors",
     vendorSearch: "", billSearch: "", billVendorFilter: "", billStatusFilter: "ALL",
-    paymentDateFrom: "", paymentDateTo: "",
+    paymentDateFrom: "", paymentDateTo: "", billPage: 1, vendorPage: 1, pageSize: 10,
   });
-  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo } = viewState;
+  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo, billPage, vendorPage, pageSize } = viewState;
   const updateViewState = <K extends keyof typeof viewState>(key: K, value: (typeof viewState)[K]) =>
-    setViewState((state) => ({ ...state, [key]: value }));
+    setViewState((state) => ({ ...state, [key]: value, ...((key === "billSearch" || key === "billVendorFilter" || key === "billStatusFilter" || key === "paymentDateFrom" || key === "paymentDateTo") ? { billPage: 1 } : {}), ...(key === "vendorSearch" ? { vendorPage: 1 } : {}) }));
   const [wideLayout, setWideLayout] = useState(false);
   const autoSelectedFirst = useRef(false);
   const linkedCustomerInvoice = selected
@@ -2266,6 +2332,13 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
     if (paymentDateTo && (!bill.paymentDate || bill.paymentDate > paymentDateTo)) return false;
     return true;
   });
+  const visibleBills = matchingBills.slice((billPage - 1) * pageSize, billPage * pageSize);
+  const visibleVendors = matchingVendors.slice((vendorPage - 1) * pageSize, vendorPage * pageSize);
+  useEffect(() => {
+    const lastBillPage = Math.max(1, Math.ceil(matchingBills.length / pageSize));
+    const lastVendorPage = Math.max(1, Math.ceil(matchingVendors.length / pageSize));
+    if (billPage > lastBillPage || vendorPage > lastVendorPage) setViewState((state) => ({ ...state, billPage: Math.min(state.billPage, lastBillPage), vendorPage: Math.min(state.vendorPage, lastVendorPage) }));
+  }, [matchingBills.length, matchingVendors.length, pageSize, billPage, vendorPage, setViewState]);
 
   useEffect(() => {
     const wide = window.matchMedia("(min-width: 761px)");
@@ -2285,11 +2358,11 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
       return;
     }
     if (!wideLayout || detailOnly || listView !== "invoices" || autoSelectedFirst.current) return;
-    const firstBill = matchingBills[0];
+    const firstBill = visibleBills[0];
     if (!firstBill) return;
     autoSelectedFirst.current = true;
     onOpen(firstBill.id);
-  }, [wideLayout, detailOnly, selected, routeId, listView, bills, matchingBills, onOpen]);
+  }, [wideLayout, detailOnly, selected, routeId, listView, visibleBills, onOpen]);
 
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
     {!detailOnly && <div className="metrics cost-metrics">
@@ -2314,12 +2387,14 @@ function Costs({ viewStateKey, bills, invoices, vendors, selected, routeId, canE
               <Field label="Paid to"><input type="date" value={paymentDateTo} onChange={(event) => updateViewState("paymentDateTo", event.target.value)} /></Field>
             </div>
           </div>
-          <div className="invoice-list">{matchingBills.length ? matchingBills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { updateViewState("listView", "invoices"); onOpen(bill.id); }}>
+          <ListPagination page={billPage} pageSize={pageSize} total={matchingBills.length} onPage={(page) => updateViewState("billPage", page)} onPageSize={(size) => { updateViewState("pageSize", size); updateViewState("billPage", 1); }} />
+          <div className="invoice-list">{matchingBills.length ? visibleBills.map((bill) => <button className={selected?.id === bill.id ? "invoice selected" : "invoice"} key={bill.id} onClick={() => { updateViewState("listView", "invoices"); onOpen(bill.id); }}>
             <b>{bill.vendorInvoiceNumber}</b><span>{bill.vendorName} · {bill.jobNumber}</span>{(bill.blNumber || bill.sourceFileName) && <small>{[bill.blNumber && `B/L ${bill.blNumber}`, bill.sourceFileName].filter(Boolean).join(" · ")}</small>}<Tag text={vendorBillStatusLabel(bill.status)} /><strong>{money.format(Number(bill.totalAmountAed))}</strong>
           </button>) : <p className="empty-inline">No vendor invoices match these filters.</p>}</div>
         </> : <div className="cost-vendor-directory">
           <label className="cost-vendor-search">Search vendors<input type="search" value={vendorSearch} onChange={(event) => updateViewState("vendorSearch", event.target.value)} placeholder="Name, vendor code, or TRN" /></label>
-          <div className="record-list">{matchingVendors.length ? matchingVendors.map((vendor) => <div key={vendor.id}>
+          <ListPagination page={vendorPage} pageSize={pageSize} total={matchingVendors.length} onPage={(page) => updateViewState("vendorPage", page)} onPageSize={(size) => { updateViewState("pageSize", size); updateViewState("vendorPage", 1); }} />
+          <div className="record-list">{matchingVendors.length ? visibleVendors.map((vendor) => <div key={vendor.id}>
             <span><b>{vendor.name}</b><small>{vendor.code} · {vendor.defaultCurrency} · {vendor.trn || "No TRN"}</small></span>
             <Tag text={vendor.active ? "ACTIVE" : "INACTIVE"} />
             {canEdit && <button className="link-button" onClick={() => onVendor(vendor)}>Edit</button>}
