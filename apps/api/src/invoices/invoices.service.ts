@@ -30,17 +30,25 @@ export class InvoicesService {
       .in("invoice_id", invoices.map(invoice => invoice.id))
       .order("line_number");
     if (linesError) throwDatabaseError(linesError);
-    return invoices.map(invoice => this.toInvoice(invoice, (lines ?? []).filter(line => line.invoice_id === invoice.id)));
+    const linesByInvoice = new Map<string, InvoiceLineRow[]>();
+    for (const line of lines ?? []) {
+      const invoiceLines = linesByInvoice.get(line.invoice_id) ?? [];
+      invoiceLines.push(line);
+      linesByInvoice.set(line.invoice_id, invoiceLines);
+    }
+    return invoices.map(invoice => this.toInvoice(invoice, linesByInvoice.get(invoice.id) ?? []));
   }
 
   async findOne(database: TransWaveDatabaseClient, id: string): Promise<Invoice> {
-    const [invoiceResult, linesResult] = await Promise.all([
-      database.from("invoices").select("*").eq("id", id).maybeSingle(),
-      database.from("invoice_lines").select("*").eq("invoice_id", id).order("line_number")
-    ]);
-    const invoice = requireData(invoiceResult.data, invoiceResult.error, "Invoice not found");
-    if (linesResult.error) throwDatabaseError(linesResult.error);
-    return this.toInvoice(invoice, linesResult.data ?? []);
+    const invoiceResult = await database
+      .from("invoices")
+      .select("*, lines:invoice_lines!invoice_lines_invoice_id_company_id_fkey(*)")
+      .eq("id", id)
+      .maybeSingle();
+    if (invoiceResult.error) throwDatabaseError(invoiceResult.error);
+    type InvoiceDetail = InvoiceRow & { lines: InvoiceLineRow[] };
+    const invoice = requireData(invoiceResult.data as unknown as InvoiceDetail | null, null, "Invoice not found");
+    return this.toInvoice(invoice, [...invoice.lines].sort((left, right) => left.line_number - right.line_number));
   }
 
   async createDraft(database: TransWaveDatabaseClient, userId: string, jobId: string, chargeIds: string[]): Promise<Invoice> {

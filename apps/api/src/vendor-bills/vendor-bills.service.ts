@@ -18,32 +18,86 @@ export class VendorBillsService {
 
     const result = await database
       .from("vendor_bills")
-      .select("id")
+      .select("*")
       .in("job_id", visibleJobIds)
       .order("bill_date", { ascending: false });
     if (result.error) throwDatabaseError(result.error);
-    return Promise.all((result.data ?? []).map((bill) => this.findOne(database, bill.id)));
-  }
+    const bills = result.data ?? [];
+    if (!bills.length) return [];
 
-  async findOne(database: TransWaveDatabaseClient, id: string): Promise<VendorBill> {
-    const billResult = await database.from("vendor_bills").select("*").eq("id", id).maybeSingle();
-    const bill = requireData(billResult.data, billResult.error, "Vendor bill not found");
-    const [linesResult, vendorResult, jobResult, invoiceResult] = await Promise.all([
-      database.from("vendor_bill_lines").select("*").eq("vendor_bill_id", id).order("line_number"),
-      database.from("vendors").select("id, vendor_code, legal_name, trn").eq("id", bill.vendor_id).single(),
-      database.from("jobs").select("id, job_number").eq("id", bill.job_id).single(),
-      bill.customer_invoice_id
-        ? database.from("invoices").select("id, invoice_number, draft_reference, subtotal_aed").eq("id", bill.customer_invoice_id).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
+    const billIds = bills.map((bill) => bill.id);
+    const vendorIds = [...new Set(bills.map((bill) => bill.vendor_id))];
+    const jobIds = [...new Set(bills.map((bill) => bill.job_id))];
+    const invoiceIds = [...new Set(bills.map((bill) => bill.customer_invoice_id).filter((id): id is string => Boolean(id)))];
+    const [linesResult, vendorsResult, jobsResult, invoicesResult] = await Promise.all([
+      database.from("vendor_bill_lines").select("*").in("vendor_bill_id", billIds).order("line_number"),
+      database.from("vendors").select("id, vendor_code, legal_name, trn").in("id", vendorIds),
+      database.from("jobs").select("id, job_number").in("id", jobIds),
+      invoiceIds.length
+        ? database.from("invoices").select("id, invoice_number, draft_reference, subtotal_aed").in("id", invoiceIds)
+        : Promise.resolve({ data: [], error: null }),
     ]);
-    for (const result of [linesResult, vendorResult, jobResult, invoiceResult]) if (result.error) throwDatabaseError(result.error);
+    for (const result of [linesResult, vendorsResult, jobsResult, invoicesResult]) if (result.error) throwDatabaseError(result.error);
     const lines = linesResult.data ?? [];
-    const serviceIds = [...new Set(lines.map((line) => line.service_id).filter((value): value is string => Boolean(value)))];
+    const serviceIds = [...new Set(lines.map((line) => line.service_id).filter((id): id is string => Boolean(id)))];
     const servicesResult = serviceIds.length
       ? await database.from("services").select("id, name").in("id", serviceIds)
       : { data: [], error: null };
     if (servicesResult.error) throwDatabaseError(servicesResult.error);
-    return this.mapBill(bill, lines, requireData(vendorResult.data, null, "Vendor not found"), requireData(jobResult.data, null, "Job not found"), invoiceResult.data, new Map((servicesResult.data ?? []).map((service) => [service.id, service.name])));
+
+    const linesByBill = new Map<string, LineRow[]>();
+    for (const line of lines) {
+      const billLines = linesByBill.get(line.vendor_bill_id) ?? [];
+      billLines.push(line);
+      linesByBill.set(line.vendor_bill_id, billLines);
+    }
+    const vendorsById = new Map((vendorsResult.data ?? []).map((vendor) => [vendor.id, vendor]));
+    const jobsById = new Map((jobsResult.data ?? []).map((job) => [job.id, job]));
+    const invoicesById = new Map((invoicesResult.data ?? []).map((invoice) => [invoice.id, invoice]));
+    const servicesById = new Map((servicesResult.data ?? []).map((service) => [service.id, service.name]));
+
+    return bills.map((bill) => {
+      const vendor = vendorsById.get(bill.vendor_id);
+      const job = jobsById.get(bill.job_id);
+      if (!vendor || !job) throw new Error("Vendor invoice references an unavailable vendor or job");
+      return this.mapBill(
+        bill,
+        linesByBill.get(bill.id) ?? [],
+        vendor,
+        job,
+        bill.customer_invoice_id ? invoicesById.get(bill.customer_invoice_id) ?? null : null,
+        servicesById,
+      );
+    });
+  }
+
+  async findOne(database: TransWaveDatabaseClient, id: string): Promise<VendorBill> {
+    const billResult = await database
+      .from("vendor_bills")
+      .select(`
+        *,
+        vendor:vendors!vendor_bills_vendor_id_company_id_fkey(id, vendor_code, legal_name, trn),
+        job:jobs!vendor_bills_job_id_company_id_fkey(id, job_number),
+        customer_invoice:invoices!vendor_bills_customer_invoice_id_company_id_fkey(id, invoice_number, draft_reference, subtotal_aed),
+        lines:vendor_bill_lines!vendor_bill_lines_vendor_bill_id_company_id_fkey(*,
+          service:services!vendor_bill_lines_service_id_company_id_fkey(id, name)
+        )
+      `)
+      .eq("id", id)
+      .maybeSingle();
+    if (billResult.error) throwDatabaseError(billResult.error);
+    type BillDetail = BillRow & {
+      vendor: { id: string; vendor_code: string; legal_name: string; trn: string | null } | null;
+      job: { id: string; job_number: string } | null;
+      customer_invoice: { id: string; invoice_number: string | null; draft_reference: string; subtotal_aed: number } | null;
+      lines: (LineRow & { service: { id: string; name: string } | null })[];
+    };
+    const bill = requireData(billResult.data as unknown as BillDetail | null, null, "Vendor bill not found");
+    const vendor = requireData(bill.vendor, null, "Vendor not found");
+    const job = requireData(bill.job, null, "Job not found");
+    const lines = [...bill.lines].sort((left, right) => left.line_number - right.line_number);
+    const services = new Map(lines.flatMap((line) => line.service ? [[line.service.id, line.service.name] as const] : []));
+    return this.mapBill(bill, lines, vendor, job, bill.customer_invoice, services);
   }
 
   async create(database: TransWaveDatabaseClient, userId: string, input: SaveVendorBill) {

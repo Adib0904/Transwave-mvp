@@ -221,13 +221,27 @@ export class JobsService {
     if (chargesError) throwDatabaseError(chargesError);
 
     const chargeIds = (charges ?? []).map((charge) => charge.id);
-    const invoiceLinesResult = chargeIds.length
-      ? await database
-          .from("invoice_lines")
-          .select("job_charge_id, invoice_id")
-          .in("job_charge_id", chargeIds)
-      : { data: [], error: null };
+    const portIds = [
+      ...new Set(
+        (shipments ?? [])
+          .flatMap((shipment) => [
+            shipment.port_of_loading_id,
+            shipment.port_of_discharge_id,
+            shipment.transshipment_port_id,
+          ])
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const [invoiceLinesResult, portsResult] = await Promise.all([
+      chargeIds.length
+        ? database.from("invoice_lines").select("job_charge_id, invoice_id").in("job_charge_id", chargeIds)
+        : Promise.resolve({ data: [], error: null }),
+      portIds.length
+        ? database.from("ports").select("id, name").in("id", portIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
     if (invoiceLinesResult.error) throwDatabaseError(invoiceLinesResult.error);
+    if (portsResult.error) throwDatabaseError(portsResult.error);
 
     const invoiceIds = [
       ...new Set(
@@ -242,31 +256,18 @@ export class JobsService {
       : { data: [], error: null };
     if (invoicesResult.error) throwDatabaseError(invoicesResult.error);
 
-    const activeJobs = jobs.filter(
-      (job) =>
-        !isFullyIssuedJob(
-          job.id,
-          charges ?? [],
-          invoiceLinesResult.data ?? [],
-          invoicesResult.data ?? [],
-        ),
-    );
-
-    const portIds = [
-      ...new Set(
-        (shipments ?? [])
-          .flatMap((shipment) => [
-            shipment.port_of_loading_id,
-            shipment.port_of_discharge_id,
-            shipment.transshipment_port_id,
-          ])
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ];
-    const portsResult = portIds.length
-      ? await database.from("ports").select("id, name").in("id", portIds)
-      : { data: [], error: null };
-    if (portsResult.error) throwDatabaseError(portsResult.error);
+    const chargesByJob = new Map<string, string[]>();
+    for (const charge of charges ?? []) {
+      const jobChargeIds = chargesByJob.get(charge.job_id) ?? [];
+      jobChargeIds.push(charge.id);
+      chargesByJob.set(charge.job_id, jobChargeIds);
+    }
+    const issuedInvoiceIds = new Set((invoicesResult.data ?? []).filter((invoice) => invoice.status === "ISSUED").map((invoice) => invoice.id));
+    const issuedChargeIds = new Set((invoiceLinesResult.data ?? []).filter((line) => issuedInvoiceIds.has(line.invoice_id)).map((line) => line.job_charge_id));
+    const activeJobs = jobs.filter((job) => {
+      const jobChargeIds = chargesByJob.get(job.id) ?? [];
+      return !jobChargeIds.length || !jobChargeIds.every((chargeId) => issuedChargeIds.has(chargeId));
+    });
 
     const customersById = new Map(
       (customers ?? []).map((customer) => [customer.id, customer.company_name]),
@@ -286,63 +287,32 @@ export class JobsService {
     database: TransWaveDatabaseClient,
     id: string,
   ): Promise<JobDetail> {
-    const jobResult = await database
-      .from("jobs")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-    const job = requireData(jobResult.data, jobResult.error, "Job not found");
-
-    const [
-      customerResult,
-      shipmentResult,
-      containersResult,
-      jobServicesResult,
-      chargesResult,
-    ] = await Promise.all([
-      database
-        .from("customers")
-        .select("id, company_name")
-        .eq("id", job.customer_id)
-        .single(),
+    const [jobResult, shipmentResult, containersResult, jobServicesResult, chargesResult] = await Promise.all([
+      database.from("jobs").select("*").eq("id", id).maybeSingle(),
       database.from("shipments").select("*").eq("job_id", id).single(),
-      database
-        .from("containers")
-        .select("*")
-        .eq("job_id", id)
-        .order("container_number"),
-      database
-        .from("job_services")
-        .select("*")
-        .eq("job_id", id)
-        .order("created_at"),
-      database
-        .from("job_charges")
-        .select("*")
-        .eq("job_id", id)
-        .order("created_at"),
+      database.from("containers").select("*").eq("job_id", id).order("container_number"),
+      database.from("job_services").select("*").eq("job_id", id).order("created_at"),
+      database.from("job_charges").select("*").eq("job_id", id).order("created_at"),
     ]);
-    const customer = requireData(
-      customerResult.data,
-      customerResult.error,
-      "Customer not found",
-    );
-    const shipment = requireData(
-      shipmentResult.data,
-      shipmentResult.error,
-      "Shipment not found",
-    );
+    if (shipmentResult.error && shipmentResult.error.code !== "PGRST116") throwDatabaseError(shipmentResult.error);
     if (containersResult.error) throwDatabaseError(containersResult.error);
     if (jobServicesResult.error) throwDatabaseError(jobServicesResult.error);
     if (chargesResult.error) throwDatabaseError(chargesResult.error);
+    const job = requireData(jobResult.data, jobResult.error, "Job not found");
+    const shipment = requireData(
+      shipmentResult.data,
+      null,
+      "Shipment not found",
+    );
 
     const jobServices = jobServicesResult.data ?? [];
     const charges = chargesResult.data ?? [];
     const serviceIds = jobServices.map((item) => item.service_id);
     const taxIds = [...new Set(charges.map((charge) => charge.tax_rate_id))];
     const chargeIds = charges.map((charge) => charge.id);
-    const [portsResult, servicesResult, taxesResult, invoiceLinesResult] =
+    const [customerResult, portsResult, servicesResult, taxesResult, invoiceLinesResult] =
       await Promise.all([
+        database.from("customers").select("id, company_name").eq("id", job.customer_id).single(),
         database
           .from("ports")
           .select("id, name")
@@ -363,10 +333,11 @@ export class JobsService {
         chargeIds.length
           ? database
               .from("invoice_lines")
-              .select("job_charge_id, invoice_id")
+              .select("job_charge_id, invoice_id, invoice:invoices!invoice_lines_invoice_id_company_id_fkey(status)")
               .in("job_charge_id", chargeIds)
           : Promise.resolve({ data: [], error: null }),
       ]);
+    const customer = requireData(customerResult.data, customerResult.error, "Customer not found");
     for (const result of [
       portsResult,
       servicesResult,
@@ -386,31 +357,10 @@ export class JobsService {
     const taxesById = new Map(
       (taxesResult.data ?? []).map((tax) => [tax.id, tax.rate]),
     );
-    const invoiceByChargeId = new Map(
-      (invoiceLinesResult.data ?? []).map((line) => [
-        line.job_charge_id,
-        line.invoice_id,
-      ]),
-    );
-    const allocatedInvoiceIds = [
-      ...new Set(
-        (invoiceLinesResult.data ?? []).map((line) => line.invoice_id),
-      ),
-    ];
-    const invoiceStatusesResult = allocatedInvoiceIds.length
-      ? await database
-          .from("invoices")
-          .select("id, status")
-          .in("id", allocatedInvoiceIds)
-      : { data: [], error: null };
-    if (invoiceStatusesResult.error)
-      throwDatabaseError(invoiceStatusesResult.error);
-    const invoiceStatusById = new Map(
-      (invoiceStatusesResult.data ?? []).map((invoice) => [
-        invoice.id,
-        invoice.status,
-      ]),
-    );
+    type InvoiceLineWithStatus = { job_charge_id: string; invoice_id: string; invoice: { status: Database["public"]["Tables"]["invoices"]["Row"]["status"] } | null };
+    const invoiceLines = (invoiceLinesResult.data ?? []) as unknown as InvoiceLineWithStatus[];
+    const invoiceByChargeId = new Map(invoiceLines.map((line) => [line.job_charge_id, line.invoice_id]));
+    const invoiceStatusById = new Map(invoiceLines.flatMap((line) => line.invoice ? [[line.invoice_id, line.invoice.status] as const] : []));
     const mappedCharges: Charge[] = charges.map((charge) => {
       const serviceId = jobServiceById.get(charge.job_service_id)?.service_id;
       const service = serviceId ? servicesById.get(serviceId) : undefined;
