@@ -14,6 +14,7 @@ export class VendorBillsController {
   constructor(@Inject(VendorBillsService) private readonly bills: VendorBillsService) {}
   @Get() list(@Req() request: AuthenticatedRequest) { return this.bills.list(request.database); }
   @Get("page") listPage(@Req() request: AuthenticatedRequest, @Query("offset") offset?: string, @Query("limit") limit?: string) { return this.bills.listPage(request.database, Number(offset ?? 0), Number(limit ?? 20)); }
+  @Get("profit-trend") profitTrend(@Req() request: AuthenticatedRequest, @Query("year") year?: string) { return this.bills.profitTrend(request.database, Number(year ?? new Date().getFullYear())); }
   @Get(":id") findOne(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) { return this.bills.findOne(request.database, id); }
   @Post() create(@Req() request: AuthenticatedRequest, @Body(new ZodValidationPipe(saveVendorBillSchema)) input: SaveVendorBill) { return this.bills.create(request.database, request.auth.userId, input); }
   @Patch(":id") update(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(saveVendorBillSchema)) input: SaveVendorBill) { return this.bills.update(request.database, request.auth.userId, id, input); }

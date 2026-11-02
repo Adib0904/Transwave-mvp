@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { containerSchema, type Invoice, type RecordPage, type UpdateInvoice } from "@transwave/contracts";
 import type { Database, Json, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
@@ -25,7 +25,10 @@ export class InvoicesService {
     return this.withLines(database, invoices ?? []);
   }
 
-  async listPage(database: TransWaveDatabaseClient, userId: string, offset: number, limit: number): Promise<RecordPage<Invoice>> {
+  async listPage(database: TransWaveDatabaseClient, userId: string, offset: number, limit: number, vendorInvoice: string = "all"): Promise<RecordPage<Invoice>> {
+    if (!["all", "linked", "missing"].includes(vendorInvoice)) {
+      throw new BadRequestException("Select a valid vendor invoice filter");
+    }
     const safeOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
     const safeLimit = Number.isFinite(limit) ? Math.min(100, Math.max(1, Math.floor(limit))) : 20;
     const tenant = await resolveTenant(database, userId);
@@ -33,6 +36,22 @@ export class InvoicesService {
       .eq("company_id", tenant.companyId).order("created_at", { ascending: false})
       .range(safeOffset, safeOffset + safeLimit - 1);
     if (tenant.role !== "OWNER" && tenant.role !== "ADMIN") query = query.eq("created_by", userId);
+    if (vendorInvoice !== "all") {
+      const linkedResult = await database.from("vendor_bills")
+        .select("customer_invoice_id")
+        .eq("company_id", tenant.companyId)
+        .not("customer_invoice_id", "is", null);
+      if (linkedResult.error) throwDatabaseError(linkedResult.error);
+      const linkedInvoiceIds = [...new Set((linkedResult.data ?? [])
+        .map((bill) => bill.customer_invoice_id)
+        .filter((id): id is string => Boolean(id)))];
+      if (vendorInvoice === "linked") {
+        if (!linkedInvoiceIds.length) return { items: [], total: 0, offset: safeOffset, limit: safeLimit, hasMore: false };
+        query = query.in("id", linkedInvoiceIds);
+      } else if (linkedInvoiceIds.length) {
+        query = query.not("id", "in", `(${linkedInvoiceIds.join(",")})`);
+      }
+    }
     const { data, error, count } = await query;
     if (error) throwDatabaseError(error);
     const items = await this.withLines(database, data ?? []);

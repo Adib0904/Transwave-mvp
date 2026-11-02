@@ -21,8 +21,8 @@ export class InvoicesController {
 
   @Get("page")
   @ApiOperation({ summary: "Get one page of visible invoices" })
-  listPage(@Req() request: AuthenticatedRequest, @Query("offset") offset?: string, @Query("limit") limit?: string) {
-    return this.invoices.listPage(request.database, request.auth.userId, Number(offset ?? 0), Number(limit ?? 20));
+  listPage(@Req() request: AuthenticatedRequest, @Query("offset") offset?: string, @Query("limit") limit?: string, @Query("vendorInvoice") vendorInvoice?: string) {
+    return this.invoices.listPage(request.database, request.auth.userId, Number(offset ?? 0), Number(limit ?? 20), vendorInvoice ?? "all");
   }
 
   @Get(":id")

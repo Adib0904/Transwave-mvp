@@ -9,6 +9,7 @@ import type {
   JobSummary,
   ManagedUser,
   MasterData,
+  MonthlyProfitReport,
   Port,
   RecordPage,
   SaveContainer,
@@ -86,7 +87,10 @@ export const api = {
   saveCharge: (s: Session, id: string, value: CreateCharge) => call<JobDetail>(s, `/jobs/${id}/charges`, { method: "POST", body: JSON.stringify(value) }),
   removeCharge: (s: Session, id: string, chargeId: string) => call<JobDetail>(s, `/jobs/${id}/charges/${chargeId}`, { method: "DELETE" }),
   invoices: (s: Session) => call<Invoice[]>(s, "/invoices"),
-  invoicePage: (s: Session, offset: number, limit = 20) => call<RecordPage<Invoice>>(s, `/invoices/page?offset=${offset}&limit=${limit}`),
+  invoicePage: (s: Session, offset: number, limit = 20, vendorInvoice: "all" | "linked" | "missing" = "all") => {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit), vendorInvoice });
+    return call<RecordPage<Invoice>>(s, `/invoices/page?${params.toString()}`);
+  },
   invoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}`),
   createDraft: (s: Session, jobId: string, chargeIds: string[]) => call<Invoice>(s, "/invoices/drafts", { method: "POST", body: JSON.stringify({ jobId, chargeIds }) }),
   issueInvoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}/issue`, { method: "POST" }),
@@ -94,6 +98,7 @@ export const api = {
   updateInvoice: (s: Session, id: string, value: UpdateInvoice) => call<Invoice>(s, `/invoices/${id}`, { method: "PATCH", body: JSON.stringify(value) }),
   vendorBills: (s: Session) => call<VendorBill[]>(s, "/vendor-bills"),
   vendorBillPage: (s: Session, offset: number, limit = 20) => call<RecordPage<VendorBill>>(s, `/vendor-bills/page?offset=${offset}&limit=${limit}`),
+  vendorBillProfitTrend: (s: Session, year: number) => call<MonthlyProfitReport>(s, `/vendor-bills/profit-trend?year=${year}`),
   vendorBill: (s: Session, id: string) => call<VendorBill>(s, `/vendor-bills/${id}`),
   createVendorBill: (s: Session, value: SaveVendorBill) => call<VendorBill>(s, "/vendor-bills", { method: "POST", body: JSON.stringify(value) }),
   updateVendorBill: (s: Session, id: string, value: SaveVendorBill) => call<VendorBill>(s, `/vendor-bills/${id}`, { method: "PATCH", body: JSON.stringify(value) }),

@@ -8,6 +8,7 @@ export type InvoiceFilters = {
   blNumber: string;
   paymentStatus: "" | Invoice["paymentStatus"];
   invoiceStatus: "" | Invoice["status"];
+  vendorInvoiceStatus: "" | "linked" | "missing";
   pol: string;
   pod: string;
 };
@@ -20,6 +21,7 @@ export const emptyInvoiceFilters: InvoiceFilters = {
   blNumber: "",
   paymentStatus: "",
   invoiceStatus: "",
+  vendorInvoiceStatus: "",
   pol: "",
   pod: "",
 };

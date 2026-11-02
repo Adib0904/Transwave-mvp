@@ -10,6 +10,7 @@ import type {
   JobDetail,
   JobSummary,
   MasterData,
+  MonthlyProfitReport,
   Port,
   RecordPage,
   SaveCustomer,
@@ -906,7 +907,7 @@ export function Workspace() {
           <Invoices
             viewStateKey={`transwave:${user.userId}:invoices`}
             invoices={invoices}
-            onLoadMore={(offset) => api.invoicePage(session, offset, 20)}
+            onLoadMore={(offset, vendorInvoice) => api.invoicePage(session, offset, 20, vendorInvoice)}
             selected={record?.section === "invoices" ? selectedInvoice : null}
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
@@ -992,6 +993,7 @@ export function Workspace() {
             viewStateKey={`transwave:${user.userId}:costs`}
             bills={vendorBills}
             onLoadMore={(offset) => api.vendorBillPage(session, offset, 20)}
+            onLoadProfitTrend={(year) => api.vendorBillProfitTrend(session, year)}
             invoices={invoices}
             vendors={masters.vendors}
             selected={record?.section === "costs"
@@ -1887,7 +1889,7 @@ function Invoices({
 }: {
   viewStateKey: string;
   invoices: Invoice[];
-  onLoadMore(offset: number): Promise<RecordPage<Invoice>>;
+  onLoadMore(offset: number, vendorInvoice: "all" | "linked" | "missing"): Promise<RecordPage<Invoice>>;
   selected: Invoice | null;
   canIssue: boolean;
   canCreateSimilar: boolean;
@@ -1908,22 +1910,23 @@ function Invoices({
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState("");
   const [invoiceTotal, setInvoiceTotal] = useState(invoices.length);
-  const firstInvoicePageRequested = useRef(false);
   const invoicePageRequestLock = useRef(false);
+  const invoicePageRequestSequence = useRef(0);
   const loadMoreTarget = useRef<HTMLDivElement>(null);
+  const initializedVendorInvoiceFilter = useRef<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentDate, setPaymentDate] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
   const [wideLayout, setWideLayout] = useState(false);
   const autoSelectedFirst = useRef(false);
-  const initialInvoices = invoices.slice(0, 20);
+  const initialInvoices = filters.vendorInvoiceStatus ? [] : invoices.slice(0, 20);
   const initialInvoiceIds = new Set(initialInvoices.map((invoice) => invoice.id));
   const loadedInvoices = [...initialInvoices, ...additionalInvoices.filter((invoice) => !initialInvoiceIds.has(invoice.id))];
   const filteredInvoices = filterInvoices(loadedInvoices, filters);
   useEffect(() => {
-    if (invoices.length) setInvoiceTotal((total) => Math.max(total, invoices.length));
-  }, [invoices.length]);
+    if (!filters.vendorInvoiceStatus && invoices.length) setInvoiceTotal((total) => Math.max(total, invoices.length));
+  }, [invoices.length, filters.vendorInvoiceStatus]);
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const customers = [...new Set(loadedInvoices.map((invoice) => invoice.customerName))].sort();
   const loadingPorts = [...new Set(loadedInvoices.map((invoice) => invoice.polName))].sort();
@@ -1932,32 +1935,46 @@ function Invoices({
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
-  const loadNextInvoicePage = useCallback(async () => {
-    if (invoicePageRequestLock.current || loadingMore || (loadedInvoiceCount >= invoiceTotal && loadedInvoiceCount > 0)) return;
+  const loadNextInvoicePage = useCallback(async (reset = false) => {
+    if (!reset && (invoicePageRequestLock.current || loadingMore || (loadedInvoiceCount >= invoiceTotal && loadedInvoiceCount > 0))) return;
+    const requestSequence = ++invoicePageRequestSequence.current;
     invoicePageRequestLock.current = true;
     setLoadingMore(true);
     setLoadMoreError("");
     try {
-      const nextPage = await onLoadMore(loadedInvoiceCount);
+      const offset = reset ? 0 : loadedInvoiceCount;
+      const nextPage = await onLoadMore(offset, filters.vendorInvoiceStatus || "all");
+      if (requestSequence !== invoicePageRequestSequence.current) return;
       setAdditionalInvoices((current) => {
+        if (reset) return nextPage.items;
         const existing = new Set([...invoices.slice(0, 20), ...current].map((invoice) => invoice.id));
         return [...current, ...nextPage.items.filter((invoice) => !existing.has(invoice.id))];
       });
-      setLoadedInvoiceCount(Math.min(nextPage.total, loadedInvoiceCount + nextPage.items.length));
+      setLoadedInvoiceCount(Math.min(nextPage.total, offset + nextPage.items.length));
       setInvoiceTotal(nextPage.total);
     } catch {
-      setLoadMoreError("Could not load more invoices. Try again.");
+      if (requestSequence === invoicePageRequestSequence.current) setLoadMoreError("Could not load more invoices. Try again.");
     } finally {
-      invoicePageRequestLock.current = false;
-      setLoadingMore(false);
+      if (requestSequence === invoicePageRequestSequence.current) {
+        invoicePageRequestLock.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, [loadingMore, loadedInvoiceCount, invoiceTotal, onLoadMore, invoices]);
+  }, [filters.vendorInvoiceStatus, loadingMore, loadedInvoiceCount, invoiceTotal, onLoadMore, invoices]);
 
   useEffect(() => {
-    if (invoices.length || firstInvoicePageRequested.current) return;
-    firstInvoicePageRequested.current = true;
-    void loadNextInvoicePage();
-  }, [invoices.length, loadNextInvoicePage]);
+    if (!filtersLoaded || initializedVendorInvoiceFilter.current === filters.vendorInvoiceStatus) return;
+    initializedVendorInvoiceFilter.current = filters.vendorInvoiceStatus;
+    setAdditionalInvoices([]);
+    setLoadedInvoiceCount(0);
+    setInvoiceTotal(0);
+    if (!filters.vendorInvoiceStatus && invoices.length) {
+      setLoadedInvoiceCount(Math.min(20, invoices.length));
+      setInvoiceTotal(invoices.length);
+      return;
+    }
+    void loadNextInvoicePage(true);
+  }, [filtersLoaded, filters.vendorInvoiceStatus, invoices.length, loadNextInvoicePage]);
 
   useEffect(() => {
     const target = loadMoreTarget.current;
@@ -2099,6 +2116,17 @@ function Invoices({
               </select>
             </label>
             <label>
+              <span>Vendor invoice</span>
+              <select
+                value={filters.vendorInvoiceStatus}
+                onChange={(event) => updateFilter("vendorInvoiceStatus", event.target.value as InvoiceFilters["vendorInvoiceStatus"])}
+              >
+                <option value="">All invoices</option>
+                <option value="linked">Has vendor invoice</option>
+                <option value="missing">Missing vendor invoice</option>
+              </select>
+            </label>
+            <label>
               <span>POL</span>
               <select value={filters.pol} onChange={(event) => updateFilter("pol", event.target.value)}>
                 <option value="">All loading ports</option>
@@ -2136,7 +2164,7 @@ function Invoices({
             </button>
           ))}
           {!filteredInvoices.length && (
-            <p className="empty-inline">{loadingMore && loadedInvoiceCount === 0 ? "Loading invoices…" : "No loaded invoices match these filters yet."}</p>
+            <p className="empty-inline">{loadingMore && loadedInvoiceCount === 0 ? "Loading invoices…" : filters.vendorInvoiceStatus && invoiceTotal === 0 ? "No invoices match this vendor invoice filter." : "No loaded invoices match these filters yet."}</p>
           )}
           <div ref={loadMoreTarget} className="list-load-more" aria-live="polite">{loadingMore ? "Loading more invoices…" : loadMoreError ? <button className="link-button" type="button" onClick={() => void loadNextInvoicePage()}>{loadMoreError}</button> : loadedInvoiceCount < invoiceTotal ? "Scroll to load more invoices" : "All invoices loaded"}</div>
         </div>
@@ -2340,13 +2368,15 @@ function Invoices({
   );
 }
 
-function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { viewStateKey: string; bills: VendorBill[]; onLoadMore(offset: number): Promise<RecordPage<VendorBill>>; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
+function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { viewStateKey: string; bills: VendorBill[]; onLoadMore(offset: number): Promise<RecordPage<VendorBill>>; onLoadProfitTrend(year: number): Promise<MonthlyProfitReport>; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
+  const currentYear = String(new Date().getFullYear());
   const [viewState, setViewState, viewStateLoaded] = usePersistedViewState(viewStateKey, {
     listView: "invoices" as "invoices" | "vendors",
     vendorSearch: "", billSearch: "", billVendorFilter: "", billStatusFilter: "ALL",
     paymentDateFrom: "", paymentDateTo: "", billPage: 1, vendorPage: 1, pageSize: 10,
+    profitPeriod: "month" as "month" | "year" | "all", profitMonth: String(new Date().getMonth() + 1).padStart(2, "0"), profitYear: currentYear,
   });
-  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo, vendorPage, pageSize } = viewState;
+  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo, vendorPage, pageSize, profitPeriod, profitMonth, profitYear } = viewState;
   const updateViewState = <K extends keyof typeof viewState>(key: K, value: (typeof viewState)[K]) =>
     setViewState((state) => ({ ...state, [key]: value, ...((key === "billSearch" || key === "billVendorFilter" || key === "billStatusFilter" || key === "paymentDateFrom" || key === "paymentDateTo") ? { billPage: 1 } : {}), ...(key === "vendorSearch" ? { vendorPage: 1 } : {}) }));
   const [wideLayout, setWideLayout] = useState(false);
@@ -2356,24 +2386,46 @@ function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, r
   const [billTotal, setBillTotal] = useState(bills.length);
   const [loadingMoreBills, setLoadingMoreBills] = useState(false);
   const [loadMoreBillsError, setLoadMoreBillsError] = useState("");
-  const [billSummary, setBillSummary] = useState<{ revenueAed: number; expenseAed: number } | null>(null);
+  const [profitTrend, setProfitTrend] = useState<MonthlyProfitReport | null>(null);
+  const [loadingProfitTrend, setLoadingProfitTrend] = useState(false);
+  const [profitTrendError, setProfitTrendError] = useState("");
+  const [profitTrendRetry, setProfitTrendRetry] = useState(0);
+  const profitTrendLoader = useRef(onLoadProfitTrend);
   const firstBillPageRequested = useRef(false);
   const billPageRequestLock = useRef(false);
   const billLoadMoreTarget = useRef<HTMLDivElement>(null);
   const autoSelectedFirst = useRef(false);
+  useEffect(() => { profitTrendLoader.current = onLoadProfitTrend; }, [onLoadProfitTrend]);
+
+  useEffect(() => {
+    if (detailOnly || !viewStateLoaded) return;
+    let active = true;
+    setLoadingProfitTrend(true);
+    setProfitTrendError("");
+    void profitTrendLoader.current(Number(profitYear)).then((report) => {
+      if (active) setProfitTrend(report);
+    }).catch(() => {
+      if (active) setProfitTrendError("Could not load profit totals.");
+    }).finally(() => {
+      if (active) setLoadingProfitTrend(false);
+    });
+    return () => { active = false; };
+  }, [profitYear, bills, invoices, detailOnly, viewStateLoaded, profitTrendRetry]);
   const linkedCustomerInvoice = selected
     ? invoices.find((invoice) => invoice.id === selected.customerInvoiceId)
     : null;
-  const linkedIncome = new Map<string, number>();
-  bills.forEach((bill) => {
-    if (bill.customerInvoiceId) linkedIncome.set(bill.customerInvoiceId, Number(bill.revenueAllocatedAed));
-  });
-  const revenue = [...linkedIncome.values()].reduce((sum, value) => sum + value, 0);
-  const expense = bills.reduce((sum, bill) => sum + Number(bill.subtotalAed), 0);
-  const displayRevenue = billSummary?.revenueAed ?? revenue;
-  const displayExpense = billSummary?.expenseAed ?? expense;
-  const profit = displayRevenue - displayExpense;
-  const margin = displayRevenue > 0 ? (profit / displayRevenue) * 100 : 0;
+  const currentProfitMonths = profitTrend?.year === Number(profitYear) ? profitTrend.months : [];
+  const periodMonths = currentProfitMonths.filter((item) => profitPeriod === "month" ? item.month === Number(profitMonth) : profitPeriod === "year");
+  const periodRevenue = profitPeriod === "all" ? profitTrend?.allTime.revenueAed ?? 0 : periodMonths.reduce((sum, item) => sum + item.revenueAed, 0);
+  const periodExpense = profitPeriod === "all" ? profitTrend?.allTime.expenseAed ?? 0 : periodMonths.reduce((sum, item) => sum + item.expenseAed, 0);
+  const periodProfit = periodRevenue - periodExpense;
+  const periodMargin = periodRevenue > 0 ? (periodProfit / periodRevenue) * 100 : 0;
+  const reportYears = [...new Set([currentYear, ...invoices.flatMap((invoice) => invoice.invoiceDate ? [invoice.invoiceDate.slice(0, 4)] : [])])].sort((left, right) => Number(right) - Number(left));
+  const profitPeriodLabel = profitPeriod === "all"
+    ? "All time"
+    : profitPeriod === "year"
+      ? profitYear
+      : `${new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(Number(profitYear), Number(profitMonth) - 1, 1))} ${profitYear}`;
   const matchingVendors = vendors.filter((vendor) => `${vendor.name} ${vendor.code} ${vendor.trn || ""}`.toLowerCase().includes(vendorSearch.trim().toLowerCase()));
   const initialBills = bills.slice(0, 20);
   const initialBillIds = new Set(initialBills.map((bill) => bill.id));
@@ -2416,7 +2468,6 @@ function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, r
   useEffect(() => {
     if (bills.length) {
       setBillTotal(bills.length);
-      setBillSummary(null);
     }
   }, [bills.length]);
 
@@ -2433,7 +2484,6 @@ function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, r
       });
       setLoadedBillCount(Math.min(nextPage.total, loadedBillCount + nextPage.items.length));
       setBillTotal(nextPage.total);
-      if (nextPage.summary) setBillSummary(nextPage.summary);
     } catch {
       setLoadMoreBillsError("Could not load more vendor invoices. Try again.");
     } finally {
@@ -2487,12 +2537,28 @@ function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, r
   }, [wideLayout, detailOnly, selected, routeId, listView, visibleBills, onOpen]);
 
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
-    {!detailOnly && <div className="metrics cost-metrics">
-      <Metric label="Allocated income" value={money.format(displayRevenue)} note="Customer revenue before VAT" />
-      <Metric label="Vendor expense" value={money.format(displayExpense)} note="Vendor cost before VAT" />
-      <Metric label="Gross profit" value={money.format(profit)} note="Income minus vendor expense" good={profit >= 0} />
-      <Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0} />
-    </div>}
+    {!detailOnly && <section className="panel cost-profit-panel">
+      <div className="panel-head cost-profit-heading">
+        <div><h2>Profit and costs</h2><p>{profitPeriodLabel} · AED · amounts before VAT</p></div>
+        <div className="cost-profit-controls">
+          <div className="dashboard-period-switch" role="group" aria-label="Cost reporting period">
+            {(["month", "year", "all"] as const).map((period) => <button key={period} type="button" className={profitPeriod === period ? "active" : ""} aria-pressed={profitPeriod === period} onClick={() => updateViewState("profitPeriod", period)}>{period === "month" ? "Monthly" : period === "year" ? "Yearly" : "All time"}</button>)}
+          </div>
+          <div className="cost-profit-date-selectors">
+            {profitPeriod === "month" && <label><span>Month</span><select value={profitMonth} onChange={(event) => updateViewState("profitMonth", event.target.value)}>{Array.from({ length: 12 }, (_, index) => { const value = String(index + 1).padStart(2, "0"); return <option key={value} value={value}>{new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(2000, index, 1))}</option>; })}</select></label>}
+            {profitPeriod !== "all" && <label><span>Year</span><select value={profitYear} onChange={(event) => updateViewState("profitYear", event.target.value)}>{reportYears.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>}
+          </div>
+        </div>
+      </div>
+      <div className="metrics cost-metrics">
+        <Metric label="Allocated income" value={money.format(periodRevenue)} note="Customer invoice income · before VAT" />
+        <Metric label="Vendor expense" value={money.format(periodExpense)} note="Linked vendor costs · before VAT" />
+        <Metric label="Gross profit" value={money.format(periodProfit)} note="Income minus vendor expense" good={periodProfit >= 0} />
+        <Metric label="Gross margin" value={`${periodMargin.toFixed(1)}%`} note="On allocated income" good={periodMargin >= 0} />
+      </div>
+      {loadingProfitTrend && profitPeriod !== "all" && <p className="cost-profit-state" role="status">Updating profit totals…</p>}
+      {profitTrendError && profitPeriod !== "all" && <div className="cost-profit-state" role="alert"><span>{profitTrendError}</span><button className="link-button" type="button" onClick={() => setProfitTrendRetry((retry) => retry + 1)}>Retry</button></div>}
+    </section>}
     <div className={`${detailOnly ? "cost-layout record-page" : "cost-layout"}${selected && !detailOnly ? " mobile-cost-detail-layout" : !detailOnly ? " mobile-cost-list-layout" : ""}`}>
       {!detailOnly && <Panel title={listView === "invoices" ? "Vendor invoices" : "Vendor master"} sub={listView === "invoices" ? `${matchingBills.length} shown · ${loadedBillCount} of ${billTotal} vendor invoices loaded` : `${vendors.length} shipping and service vendor${vendors.length === 1 ? "" : "s"}`}>
         <div className="cost-list-switcher" role="tablist" aria-label="Costs lists">
