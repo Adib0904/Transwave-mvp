@@ -2374,6 +2374,11 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
 
   useEffect(() => {
     if (detailOnly || !viewStateLoaded) return;
+    if (profitPeriod === "all") {
+      setLoadingProfitTrend(false);
+      setProfitTrendError("");
+      return;
+    }
     let active = true;
     setLoadingProfitTrend(true);
     setProfitTrendError("");
@@ -2385,7 +2390,7 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
       if (active) setLoadingProfitTrend(false);
     });
     return () => { active = false; };
-  }, [profitYear, bills, invoices, detailOnly, viewStateLoaded, profitTrendRetry]);
+  }, [profitYear, profitPeriod, bills, invoices, detailOnly, viewStateLoaded, profitTrendRetry]);
   const linkedCustomerInvoice = selected
     ? invoices.find((invoice) => invoice.id === selected.customerInvoiceId)
     : null;
@@ -2397,13 +2402,13 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
   const expense = bills.reduce((sum, bill) => sum + Number(bill.subtotalAed), 0);
   const displayRevenue = billSummary?.revenueAed ?? revenue;
   const displayExpense = billSummary?.expenseAed ?? expense;
-  const periodMonths = (profitTrend?.months ?? []).filter((item) => profitPeriod === "month" ? item.month === Number(profitMonth) : profitPeriod === "year" || profitPeriod === "all");
+  const currentProfitMonths = profitTrend?.year === Number(profitYear) ? profitTrend.months : [];
+  const periodMonths = currentProfitMonths.filter((item) => profitPeriod === "month" ? item.month === Number(profitMonth) : profitPeriod === "year");
   const periodRevenue = profitPeriod === "all" ? displayRevenue : periodMonths.reduce((sum, item) => sum + item.revenueAed, 0);
   const periodExpense = profitPeriod === "all" ? displayExpense : periodMonths.reduce((sum, item) => sum + item.expenseAed, 0);
   const periodProfit = periodRevenue - periodExpense;
   const periodMargin = periodRevenue > 0 ? (periodProfit / periodRevenue) * 100 : 0;
   const reportYears = [...new Set([currentYear, ...invoices.flatMap((invoice) => invoice.invoiceDate ? [invoice.invoiceDate.slice(0, 4)] : [])])].sort((left, right) => Number(right) - Number(left));
-  const maxAbsoluteProfit = Math.max(1, ...(profitTrend?.months ?? []).map((item) => Math.abs(item.profitAed)));
   const profitPeriodLabel = profitPeriod === "all"
     ? "All time"
     : profitPeriod === "year"
@@ -2531,7 +2536,7 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
           </div>
           <div className="cost-profit-date-selectors">
             {profitPeriod === "month" && <label><span>Month</span><select value={profitMonth} onChange={(event) => updateViewState("profitMonth", event.target.value)}>{Array.from({ length: 12 }, (_, index) => { const value = String(index + 1).padStart(2, "0"); return <option key={value} value={value}>{new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(2000, index, 1))}</option>; })}</select></label>}
-            <label><span>{profitPeriod === "all" ? "Chart year" : "Year"}</span><select value={profitYear} onChange={(event) => updateViewState("profitYear", event.target.value)}>{reportYears.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
+            {profitPeriod !== "all" && <label><span>Year</span><select value={profitYear} onChange={(event) => updateViewState("profitYear", event.target.value)}>{reportYears.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>}
           </div>
         </div>
       </div>
@@ -2541,22 +2546,8 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
         <Metric label="Gross profit" value={money.format(periodProfit)} note="Income minus vendor expense" good={periodProfit >= 0} />
         <Metric label="Gross margin" value={`${periodMargin.toFixed(1)}%`} note="On allocated income" good={periodMargin >= 0} />
       </div>
-      <div className="cost-profit-chart">
-        <div className="cost-profit-chart-heading"><div><b>Monthly gross profit</b><small>Linked vendor costs are grouped with their customer invoice month.</small></div><span>{profitYear}</span></div>
-        {loadingProfitTrend ? <p className="cost-profit-state" role="status">Loading monthly profit…</p> : profitTrendError ? <div className="cost-profit-state" role="alert"><span>{profitTrendError}</span><button className="link-button" type="button" onClick={() => setProfitTrendRetry((retry) => retry + 1)}>Retry</button></div> : <div className="cost-profit-rows">
-          {(profitTrend?.months ?? []).map((item) => {
-            const positive = item.profitAed >= 0;
-            const width = `${Math.abs(item.profitAed) / maxAbsoluteProfit * 50}%`;
-            const monthLabel = new Intl.DateTimeFormat("en", { month: "short" }).format(new Date(Number(profitYear), item.month - 1, 1));
-            return <div className="cost-profit-row" key={`${profitTrend?.year ?? profitYear}-${item.month}`} title={`Income ${money.format(item.revenueAed)} · Costs ${money.format(item.expenseAed)} · Profit ${money.format(item.profitAed)}`}>
-              <span>{monthLabel}</span>
-              <div className="cost-profit-track" aria-hidden="true"><i className={positive ? "positive-bar" : "negative-bar"} style={positive ? { left: "50%", width } : { left: `calc(50% - ${width})`, width }} /></div>
-              <strong className={positive ? "positive" : "negative"}>{money.format(item.profitAed)}</strong>
-            </div>;
-          })}
-        </div>}
-        <div className="cost-profit-axis-note"><span>Loss</span><span>Break even</span><span>Profit</span></div>
-      </div>
+      {loadingProfitTrend && profitPeriod !== "all" && <p className="cost-profit-state" role="status">Updating profit totals…</p>}
+      {profitTrendError && profitPeriod !== "all" && <div className="cost-profit-state" role="alert"><span>{profitTrendError}</span><button className="link-button" type="button" onClick={() => setProfitTrendRetry((retry) => retry + 1)}>Retry</button></div>}
     </section>}
     <div className={`${detailOnly ? "cost-layout record-page" : "cost-layout"}${selected && !detailOnly ? " mobile-cost-detail-layout" : !detailOnly ? " mobile-cost-list-layout" : ""}`}>
       {!detailOnly && <Panel title={listView === "invoices" ? "Vendor invoices" : "Vendor master"} sub={listView === "invoices" ? `${matchingBills.length} shown · ${loadedBillCount} of ${billTotal} vendor invoices loaded` : `${vendors.length} shipping and service vendor${vendors.length === 1 ? "" : "s"}`}>
