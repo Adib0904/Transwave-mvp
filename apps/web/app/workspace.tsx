@@ -2360,7 +2360,6 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
   const [billTotal, setBillTotal] = useState(bills.length);
   const [loadingMoreBills, setLoadingMoreBills] = useState(false);
   const [loadMoreBillsError, setLoadMoreBillsError] = useState("");
-  const [billSummary, setBillSummary] = useState<{ revenueAed: number; expenseAed: number } | null>(null);
   const [profitTrend, setProfitTrend] = useState<MonthlyProfitReport | null>(null);
   const [loadingProfitTrend, setLoadingProfitTrend] = useState(false);
   const [profitTrendError, setProfitTrendError] = useState("");
@@ -2374,38 +2373,25 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
 
   useEffect(() => {
     if (detailOnly || !viewStateLoaded) return;
-    if (profitPeriod === "all") {
-      setLoadingProfitTrend(false);
-      setProfitTrendError("");
-      return;
-    }
     let active = true;
     setLoadingProfitTrend(true);
     setProfitTrendError("");
     void profitTrendLoader.current(Number(profitYear)).then((report) => {
       if (active) setProfitTrend(report);
     }).catch(() => {
-      if (active) setProfitTrendError("Could not load the monthly profit chart.");
+      if (active) setProfitTrendError("Could not load profit totals.");
     }).finally(() => {
       if (active) setLoadingProfitTrend(false);
     });
     return () => { active = false; };
-  }, [profitYear, profitPeriod, bills, invoices, detailOnly, viewStateLoaded, profitTrendRetry]);
+  }, [profitYear, bills, invoices, detailOnly, viewStateLoaded, profitTrendRetry]);
   const linkedCustomerInvoice = selected
     ? invoices.find((invoice) => invoice.id === selected.customerInvoiceId)
     : null;
-  const linkedIncome = new Map<string, number>();
-  bills.forEach((bill) => {
-    if (bill.customerInvoiceId) linkedIncome.set(bill.customerInvoiceId, Number(bill.revenueAllocatedAed));
-  });
-  const revenue = [...linkedIncome.values()].reduce((sum, value) => sum + value, 0);
-  const expense = bills.reduce((sum, bill) => sum + Number(bill.subtotalAed), 0);
-  const displayRevenue = billSummary?.revenueAed ?? revenue;
-  const displayExpense = billSummary?.expenseAed ?? expense;
   const currentProfitMonths = profitTrend?.year === Number(profitYear) ? profitTrend.months : [];
   const periodMonths = currentProfitMonths.filter((item) => profitPeriod === "month" ? item.month === Number(profitMonth) : profitPeriod === "year");
-  const periodRevenue = profitPeriod === "all" ? displayRevenue : periodMonths.reduce((sum, item) => sum + item.revenueAed, 0);
-  const periodExpense = profitPeriod === "all" ? displayExpense : periodMonths.reduce((sum, item) => sum + item.expenseAed, 0);
+  const periodRevenue = profitPeriod === "all" ? profitTrend?.allTime.revenueAed ?? 0 : periodMonths.reduce((sum, item) => sum + item.revenueAed, 0);
+  const periodExpense = profitPeriod === "all" ? profitTrend?.allTime.expenseAed ?? 0 : periodMonths.reduce((sum, item) => sum + item.expenseAed, 0);
   const periodProfit = periodRevenue - periodExpense;
   const periodMargin = periodRevenue > 0 ? (periodProfit / periodRevenue) * 100 : 0;
   const reportYears = [...new Set([currentYear, ...invoices.flatMap((invoice) => invoice.invoiceDate ? [invoice.invoiceDate.slice(0, 4)] : [])])].sort((left, right) => Number(right) - Number(left));
@@ -2456,7 +2442,6 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
   useEffect(() => {
     if (bills.length) {
       setBillTotal(bills.length);
-      setBillSummary(null);
     }
   }, [bills.length]);
 
@@ -2473,7 +2458,6 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
       });
       setLoadedBillCount(Math.min(nextPage.total, loadedBillCount + nextPage.items.length));
       setBillTotal(nextPage.total);
-      if (nextPage.summary) setBillSummary(nextPage.summary);
     } catch {
       setLoadMoreBillsError("Could not load more vendor invoices. Try again.");
     } finally {

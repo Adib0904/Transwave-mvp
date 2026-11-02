@@ -19,25 +19,29 @@ export class VendorBillsService {
     if (visibleJobs.error) throwDatabaseError(visibleJobs.error);
     const jobIds = (visibleJobs.data ?? []).map((job) => job.id);
     const months = Array.from({ length: 12 }, (_, index) => ({ month: index + 1, revenueAed: 0, expenseAed: 0, profitAed: 0 }));
-    if (!jobIds.length) return { year, months };
+    if (!jobIds.length) return { year, months, allTime: { revenueAed: 0, expenseAed: 0, profitAed: 0 } };
 
     const invoicesResult = await database.from("invoices")
       .select("id, invoice_date, subtotal_aed")
       .in("job_id", jobIds)
       .eq("status", "ISSUED")
-      .gte("invoice_date", `${year}-01-01`)
-      .lt("invoice_date", `${year + 1}-01-01`);
+      .not("invoice_date", "is", null);
     if (invoicesResult.error) throwDatabaseError(invoicesResult.error);
     const invoices = invoicesResult.data ?? [];
     const invoiceMonthById = new Map<string, number>();
+    let allTimeRevenue = 0;
     for (const invoice of invoices) {
       if (!invoice.invoice_date) continue;
+      const invoiceYear = Number(invoice.invoice_date.slice(0, 4));
       const month = Number(invoice.invoice_date.slice(5, 7));
-      invoiceMonthById.set(invoice.id, month);
-      months[month - 1]!.revenueAed += Number(invoice.subtotal_aed ?? 0);
+      invoiceMonthById.set(invoice.id, invoiceYear === year ? month : 0);
+      const revenue = Number(invoice.subtotal_aed ?? 0);
+      allTimeRevenue += revenue;
+      if (invoiceYear === year) months[month - 1]!.revenueAed += revenue;
     }
 
     const invoiceIds = [...invoiceMonthById.keys()];
+    let allTimeExpense = 0;
     if (invoiceIds.length) {
       const billsResult = await database.from("vendor_bills")
         .select("id, customer_invoice_id")
@@ -47,7 +51,7 @@ export class VendorBillsService {
       const monthByBillId = new Map<string, number>();
       for (const bill of bills) {
         const month = bill.customer_invoice_id ? invoiceMonthById.get(bill.customer_invoice_id) : undefined;
-        if (month) monthByBillId.set(bill.id, month);
+        if (month !== undefined) monthByBillId.set(bill.id, month);
       }
 
       const billIds = [...monthByBillId.keys()];
@@ -58,13 +62,23 @@ export class VendorBillsService {
         if (linesResult.error) throwDatabaseError(linesResult.error);
         for (const line of linesResult.data ?? []) {
           const month = monthByBillId.get(line.vendor_bill_id);
-          if (month) months[month - 1]!.expenseAed += Number(line.net_amount_aed ?? 0);
+          const amount = Number(line.net_amount_aed ?? 0);
+          allTimeExpense += amount;
+          if (month) months[month - 1]!.expenseAed += amount;
         }
       }
     }
 
     for (const month of months) month.profitAed = month.revenueAed - month.expenseAed;
-    return { year, months };
+    return {
+      year,
+      months,
+      allTime: {
+        revenueAed: allTimeRevenue,
+        expenseAed: allTimeExpense,
+        profitAed: allTimeRevenue - allTimeExpense,
+      },
+    };
   }
 
   async list(database: TransWaveDatabaseClient): Promise<VendorBill[]> {
@@ -90,34 +104,18 @@ export class VendorBillsService {
     if (visibleJobs.error) throwDatabaseError(visibleJobs.error);
     const visibleJobIds = (visibleJobs.data ?? []).map((job) => job.id);
     if (visibleJobIds.length === 0) return { items: [], total: 0, offset: safeOffset, limit: safeLimit, hasMore: false };
-    const [result, totalsResult] = await Promise.all([
-      database.from("vendor_bills").select("*", { count: "exact" })
+    const result = await database.from("vendor_bills").select("*", { count: "exact" })
         .in("job_id", visibleJobIds).order("bill_date", { ascending: false })
-        .range(safeOffset, safeOffset + safeLimit - 1),
-      database.from("vendor_bills").select("id, customer_invoice_id").in("job_id", visibleJobIds),
-    ]);
+        .range(safeOffset, safeOffset + safeLimit - 1);
     if (result.error) throwDatabaseError(result.error);
-    if (totalsResult.error) throwDatabaseError(totalsResult.error);
     const items = await this.enrich(database, result.data ?? []);
     const total = result.count ?? items.length;
-    const allBillIds = (totalsResult.data ?? []).map((bill) => bill.id);
-    const invoiceIds = [...new Set((totalsResult.data ?? []).map((bill) => bill.customer_invoice_id).filter((id): id is string => Boolean(id)))];
-    const [linesResult, invoicesResult] = await Promise.all([
-      allBillIds.length ? database.from("vendor_bill_lines").select("net_amount_aed").in("vendor_bill_id", allBillIds) : Promise.resolve({ data: [], error: null }),
-      invoiceIds.length ? database.from("invoices").select("id, subtotal_aed").in("id", invoiceIds) : Promise.resolve({ data: [], error: null }),
-    ]);
-    if (linesResult.error) throwDatabaseError(linesResult.error);
-    if (invoicesResult.error) throwDatabaseError(invoicesResult.error);
     return {
       items,
       total,
       offset: safeOffset,
       limit: safeLimit,
       hasMore: safeOffset + items.length < total,
-      summary: {
-        revenueAed: (invoicesResult.data ?? []).reduce((sum, invoice) => sum + Number(invoice.subtotal_aed ?? 0), 0),
-        expenseAed: (linesResult.data ?? []).reduce((sum, line) => sum + Number(line.net_amount_aed ?? 0), 0),
-      },
     };
   }
 
