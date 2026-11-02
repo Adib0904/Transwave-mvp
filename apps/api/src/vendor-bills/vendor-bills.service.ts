@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import type { AttachVendorDocument, RecordPage, SaveVendorBill, VendorBill } from "@transwave/contracts";
+import { BadRequestException, Injectable } from "@nestjs/common";
+import type { AttachVendorDocument, MonthlyProfitReport, RecordPage, SaveVendorBill, VendorBill } from "@transwave/contracts";
 import type { Database, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
@@ -10,6 +10,63 @@ type LineRow = Database["public"]["Tables"]["vendor_bill_lines"]["Row"];
 
 @Injectable()
 export class VendorBillsService {
+  async profitTrend(database: TransWaveDatabaseClient, year: number): Promise<MonthlyProfitReport> {
+    if (!Number.isInteger(year) || year < 2000 || year > 9998) {
+      throw new BadRequestException("Select a valid reporting year");
+    }
+
+    const visibleJobs = await database.from("jobs").select("id");
+    if (visibleJobs.error) throwDatabaseError(visibleJobs.error);
+    const jobIds = (visibleJobs.data ?? []).map((job) => job.id);
+    const months = Array.from({ length: 12 }, (_, index) => ({ month: index + 1, revenueAed: 0, expenseAed: 0, profitAed: 0 }));
+    if (!jobIds.length) return { year, months };
+
+    const invoicesResult = await database.from("invoices")
+      .select("id, invoice_date, subtotal_aed")
+      .in("job_id", jobIds)
+      .eq("status", "ISSUED")
+      .gte("invoice_date", `${year}-01-01`)
+      .lt("invoice_date", `${year + 1}-01-01`);
+    if (invoicesResult.error) throwDatabaseError(invoicesResult.error);
+    const invoices = invoicesResult.data ?? [];
+    const invoiceMonthById = new Map<string, number>();
+    for (const invoice of invoices) {
+      if (!invoice.invoice_date) continue;
+      const month = Number(invoice.invoice_date.slice(5, 7));
+      invoiceMonthById.set(invoice.id, month);
+      months[month - 1]!.revenueAed += Number(invoice.subtotal_aed ?? 0);
+    }
+
+    const invoiceIds = [...invoiceMonthById.keys()];
+    if (invoiceIds.length) {
+      const billsResult = await database.from("vendor_bills")
+        .select("id, customer_invoice_id")
+        .in("customer_invoice_id", invoiceIds);
+      if (billsResult.error) throwDatabaseError(billsResult.error);
+      const bills = billsResult.data ?? [];
+      const monthByBillId = new Map<string, number>();
+      for (const bill of bills) {
+        const month = bill.customer_invoice_id ? invoiceMonthById.get(bill.customer_invoice_id) : undefined;
+        if (month) monthByBillId.set(bill.id, month);
+      }
+
+      const billIds = [...monthByBillId.keys()];
+      if (billIds.length) {
+        const linesResult = await database.from("vendor_bill_lines")
+          .select("vendor_bill_id, net_amount_aed")
+          .in("vendor_bill_id", billIds);
+        if (linesResult.error) throwDatabaseError(linesResult.error);
+        for (const line of linesResult.data ?? []) {
+          const month = monthByBillId.get(line.vendor_bill_id);
+          if (month) months[month - 1]!.expenseAed += Number(line.net_amount_aed ?? 0);
+        }
+      }
+    }
+
+    for (const month of months) month.profitAed = month.revenueAed - month.expenseAed;
+    return { year, months };
+  }
+
   async list(database: TransWaveDatabaseClient): Promise<VendorBill[]> {
     const visibleJobs = await database.from("jobs").select("id");
     if (visibleJobs.error) throwDatabaseError(visibleJobs.error);

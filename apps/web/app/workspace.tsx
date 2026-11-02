@@ -10,6 +10,7 @@ import type {
   JobDetail,
   JobSummary,
   MasterData,
+  MonthlyProfitReport,
   Port,
   RecordPage,
   SaveCustomer,
@@ -992,6 +993,7 @@ export function Workspace() {
             viewStateKey={`transwave:${user.userId}:costs`}
             bills={vendorBills}
             onLoadMore={(offset) => api.vendorBillPage(session, offset, 20)}
+            onLoadProfitTrend={(year) => api.vendorBillProfitTrend(session, year)}
             invoices={invoices}
             vendors={masters.vendors}
             selected={record?.section === "costs"
@@ -2340,13 +2342,15 @@ function Invoices({
   );
 }
 
-function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { viewStateKey: string; bills: VendorBill[]; onLoadMore(offset: number): Promise<RecordPage<VendorBill>>; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
+function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, vendors, selected, routeId, canEdit, onOpen, onEdit, onDelete, onVendor, onOpenInvoice, onOpenDocument, detailOnly }: { viewStateKey: string; bills: VendorBill[]; onLoadMore(offset: number): Promise<RecordPage<VendorBill>>; onLoadProfitTrend(year: number): Promise<MonthlyProfitReport>; invoices: Invoice[]; vendors: Vendor[]; selected: VendorBill | null; routeId: string | null; canEdit: boolean; onOpen(id: string): void; onEdit(): void; onDelete(): void; onVendor(vendor: Vendor): void; onOpenInvoice(id: string): void; onOpenDocument(path: string): void; detailOnly: boolean }) {
+  const currentYear = String(new Date().getFullYear());
   const [viewState, setViewState, viewStateLoaded] = usePersistedViewState(viewStateKey, {
     listView: "invoices" as "invoices" | "vendors",
     vendorSearch: "", billSearch: "", billVendorFilter: "", billStatusFilter: "ALL",
     paymentDateFrom: "", paymentDateTo: "", billPage: 1, vendorPage: 1, pageSize: 10,
+    profitPeriod: "month" as "month" | "year" | "all", profitMonth: String(new Date().getMonth() + 1).padStart(2, "0"), profitYear: currentYear,
   });
-  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo, vendorPage, pageSize } = viewState;
+  const { listView, vendorSearch, billSearch, billVendorFilter, billStatusFilter, paymentDateFrom, paymentDateTo, vendorPage, pageSize, profitPeriod, profitMonth, profitYear } = viewState;
   const updateViewState = <K extends keyof typeof viewState>(key: K, value: (typeof viewState)[K]) =>
     setViewState((state) => ({ ...state, [key]: value, ...((key === "billSearch" || key === "billVendorFilter" || key === "billStatusFilter" || key === "paymentDateFrom" || key === "paymentDateTo") ? { billPage: 1 } : {}), ...(key === "vendorSearch" ? { vendorPage: 1 } : {}) }));
   const [wideLayout, setWideLayout] = useState(false);
@@ -2357,10 +2361,31 @@ function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, r
   const [loadingMoreBills, setLoadingMoreBills] = useState(false);
   const [loadMoreBillsError, setLoadMoreBillsError] = useState("");
   const [billSummary, setBillSummary] = useState<{ revenueAed: number; expenseAed: number } | null>(null);
+  const [profitTrend, setProfitTrend] = useState<MonthlyProfitReport | null>(null);
+  const [loadingProfitTrend, setLoadingProfitTrend] = useState(false);
+  const [profitTrendError, setProfitTrendError] = useState("");
+  const [profitTrendRetry, setProfitTrendRetry] = useState(0);
+  const profitTrendLoader = useRef(onLoadProfitTrend);
   const firstBillPageRequested = useRef(false);
   const billPageRequestLock = useRef(false);
   const billLoadMoreTarget = useRef<HTMLDivElement>(null);
   const autoSelectedFirst = useRef(false);
+  useEffect(() => { profitTrendLoader.current = onLoadProfitTrend; }, [onLoadProfitTrend]);
+
+  useEffect(() => {
+    if (detailOnly || !viewStateLoaded) return;
+    let active = true;
+    setLoadingProfitTrend(true);
+    setProfitTrendError("");
+    void profitTrendLoader.current(Number(profitYear)).then((report) => {
+      if (active) setProfitTrend(report);
+    }).catch(() => {
+      if (active) setProfitTrendError("Could not load the monthly profit chart.");
+    }).finally(() => {
+      if (active) setLoadingProfitTrend(false);
+    });
+    return () => { active = false; };
+  }, [profitYear, bills, invoices, detailOnly, viewStateLoaded, profitTrendRetry]);
   const linkedCustomerInvoice = selected
     ? invoices.find((invoice) => invoice.id === selected.customerInvoiceId)
     : null;
@@ -2372,8 +2397,18 @@ function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, r
   const expense = bills.reduce((sum, bill) => sum + Number(bill.subtotalAed), 0);
   const displayRevenue = billSummary?.revenueAed ?? revenue;
   const displayExpense = billSummary?.expenseAed ?? expense;
-  const profit = displayRevenue - displayExpense;
-  const margin = displayRevenue > 0 ? (profit / displayRevenue) * 100 : 0;
+  const periodMonths = (profitTrend?.months ?? []).filter((item) => profitPeriod === "month" ? item.month === Number(profitMonth) : profitPeriod === "year" || profitPeriod === "all");
+  const periodRevenue = profitPeriod === "all" ? displayRevenue : periodMonths.reduce((sum, item) => sum + item.revenueAed, 0);
+  const periodExpense = profitPeriod === "all" ? displayExpense : periodMonths.reduce((sum, item) => sum + item.expenseAed, 0);
+  const periodProfit = periodRevenue - periodExpense;
+  const periodMargin = periodRevenue > 0 ? (periodProfit / periodRevenue) * 100 : 0;
+  const reportYears = [...new Set([currentYear, ...invoices.flatMap((invoice) => invoice.invoiceDate ? [invoice.invoiceDate.slice(0, 4)] : [])])].sort((left, right) => Number(right) - Number(left));
+  const maxAbsoluteProfit = Math.max(1, ...(profitTrend?.months ?? []).map((item) => Math.abs(item.profitAed)));
+  const profitPeriodLabel = profitPeriod === "all"
+    ? "All time"
+    : profitPeriod === "year"
+      ? profitYear
+      : `${new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(Number(profitYear), Number(profitMonth) - 1, 1))} ${profitYear}`;
   const matchingVendors = vendors.filter((vendor) => `${vendor.name} ${vendor.code} ${vendor.trn || ""}`.toLowerCase().includes(vendorSearch.trim().toLowerCase()));
   const initialBills = bills.slice(0, 20);
   const initialBillIds = new Set(initialBills.map((bill) => bill.id));
@@ -2487,12 +2522,42 @@ function Costs({ viewStateKey, bills, onLoadMore, invoices, vendors, selected, r
   }, [wideLayout, detailOnly, selected, routeId, listView, visibleBills, onOpen]);
 
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
-    {!detailOnly && <div className="metrics cost-metrics">
-      <Metric label="Allocated income" value={money.format(displayRevenue)} note="Customer revenue before VAT" />
-      <Metric label="Vendor expense" value={money.format(displayExpense)} note="Vendor cost before VAT" />
-      <Metric label="Gross profit" value={money.format(profit)} note="Income minus vendor expense" good={profit >= 0} />
-      <Metric label="Gross margin" value={`${margin.toFixed(1)}%`} note="On allocated income" good={margin >= 0} />
-    </div>}
+    {!detailOnly && <section className="panel cost-profit-panel">
+      <div className="panel-head cost-profit-heading">
+        <div><h2>Profit and costs</h2><p>{profitPeriodLabel} · AED · amounts before VAT</p></div>
+        <div className="cost-profit-controls">
+          <div className="dashboard-period-switch" role="group" aria-label="Cost reporting period">
+            {(["month", "year", "all"] as const).map((period) => <button key={period} type="button" className={profitPeriod === period ? "active" : ""} aria-pressed={profitPeriod === period} onClick={() => updateViewState("profitPeriod", period)}>{period === "month" ? "Monthly" : period === "year" ? "Yearly" : "All time"}</button>)}
+          </div>
+          <div className="cost-profit-date-selectors">
+            {profitPeriod === "month" && <label><span>Month</span><select value={profitMonth} onChange={(event) => updateViewState("profitMonth", event.target.value)}>{Array.from({ length: 12 }, (_, index) => { const value = String(index + 1).padStart(2, "0"); return <option key={value} value={value}>{new Intl.DateTimeFormat("en", { month: "long" }).format(new Date(2000, index, 1))}</option>; })}</select></label>}
+            <label><span>{profitPeriod === "all" ? "Chart year" : "Year"}</span><select value={profitYear} onChange={(event) => updateViewState("profitYear", event.target.value)}>{reportYears.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>
+          </div>
+        </div>
+      </div>
+      <div className="metrics cost-metrics">
+        <Metric label="Allocated income" value={money.format(periodRevenue)} note="Customer invoice income · before VAT" />
+        <Metric label="Vendor expense" value={money.format(periodExpense)} note="Linked vendor costs · before VAT" />
+        <Metric label="Gross profit" value={money.format(periodProfit)} note="Income minus vendor expense" good={periodProfit >= 0} />
+        <Metric label="Gross margin" value={`${periodMargin.toFixed(1)}%`} note="On allocated income" good={periodMargin >= 0} />
+      </div>
+      <div className="cost-profit-chart">
+        <div className="cost-profit-chart-heading"><div><b>Monthly gross profit</b><small>Linked vendor costs are grouped with their customer invoice month.</small></div><span>{profitYear}</span></div>
+        {loadingProfitTrend ? <p className="cost-profit-state" role="status">Loading monthly profit…</p> : profitTrendError ? <div className="cost-profit-state" role="alert"><span>{profitTrendError}</span><button className="link-button" type="button" onClick={() => setProfitTrendRetry((retry) => retry + 1)}>Retry</button></div> : <div className="cost-profit-rows">
+          {(profitTrend?.months ?? []).map((item) => {
+            const positive = item.profitAed >= 0;
+            const width = `${Math.abs(item.profitAed) / maxAbsoluteProfit * 50}%`;
+            const monthLabel = new Intl.DateTimeFormat("en", { month: "short" }).format(new Date(Number(profitYear), item.month - 1, 1));
+            return <div className="cost-profit-row" key={`${profitTrend?.year ?? profitYear}-${item.month}`} title={`Income ${money.format(item.revenueAed)} · Costs ${money.format(item.expenseAed)} · Profit ${money.format(item.profitAed)}`}>
+              <span>{monthLabel}</span>
+              <div className="cost-profit-track" aria-hidden="true"><i className={positive ? "positive-bar" : "negative-bar"} style={positive ? { left: "50%", width } : { left: `calc(50% - ${width})`, width }} /></div>
+              <strong className={positive ? "positive" : "negative"}>{money.format(item.profitAed)}</strong>
+            </div>;
+          })}
+        </div>}
+        <div className="cost-profit-axis-note"><span>Loss</span><span>Break even</span><span>Profit</span></div>
+      </div>
+    </section>}
     <div className={`${detailOnly ? "cost-layout record-page" : "cost-layout"}${selected && !detailOnly ? " mobile-cost-detail-layout" : !detailOnly ? " mobile-cost-list-layout" : ""}`}>
       {!detailOnly && <Panel title={listView === "invoices" ? "Vendor invoices" : "Vendor master"} sub={listView === "invoices" ? `${matchingBills.length} shown · ${loadedBillCount} of ${billTotal} vendor invoices loaded` : `${vendors.length} shipping and service vendor${vendors.length === 1 ? "" : "s"}`}>
         <div className="cost-list-switcher" role="tablist" aria-label="Costs lists">
