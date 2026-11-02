@@ -907,7 +907,7 @@ export function Workspace() {
           <Invoices
             viewStateKey={`transwave:${user.userId}:invoices`}
             invoices={invoices}
-            onLoadMore={(offset) => api.invoicePage(session, offset, 20)}
+            onLoadMore={(offset, vendorInvoice) => api.invoicePage(session, offset, 20, vendorInvoice)}
             selected={record?.section === "invoices" ? selectedInvoice : null}
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
@@ -1889,7 +1889,7 @@ function Invoices({
 }: {
   viewStateKey: string;
   invoices: Invoice[];
-  onLoadMore(offset: number): Promise<RecordPage<Invoice>>;
+  onLoadMore(offset: number, vendorInvoice: "all" | "linked" | "missing"): Promise<RecordPage<Invoice>>;
   selected: Invoice | null;
   canIssue: boolean;
   canCreateSimilar: boolean;
@@ -1910,22 +1910,23 @@ function Invoices({
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState("");
   const [invoiceTotal, setInvoiceTotal] = useState(invoices.length);
-  const firstInvoicePageRequested = useRef(false);
   const invoicePageRequestLock = useRef(false);
+  const invoicePageRequestSequence = useRef(0);
   const loadMoreTarget = useRef<HTMLDivElement>(null);
+  const initializedVendorInvoiceFilter = useRef<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentDate, setPaymentDate] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
   const [wideLayout, setWideLayout] = useState(false);
   const autoSelectedFirst = useRef(false);
-  const initialInvoices = invoices.slice(0, 20);
+  const initialInvoices = filters.vendorInvoiceStatus ? [] : invoices.slice(0, 20);
   const initialInvoiceIds = new Set(initialInvoices.map((invoice) => invoice.id));
   const loadedInvoices = [...initialInvoices, ...additionalInvoices.filter((invoice) => !initialInvoiceIds.has(invoice.id))];
   const filteredInvoices = filterInvoices(loadedInvoices, filters);
   useEffect(() => {
-    if (invoices.length) setInvoiceTotal((total) => Math.max(total, invoices.length));
-  }, [invoices.length]);
+    if (!filters.vendorInvoiceStatus && invoices.length) setInvoiceTotal((total) => Math.max(total, invoices.length));
+  }, [invoices.length, filters.vendorInvoiceStatus]);
   const activeFilterCount = Object.values(filters).filter(Boolean).length;
   const customers = [...new Set(loadedInvoices.map((invoice) => invoice.customerName))].sort();
   const loadingPorts = [...new Set(loadedInvoices.map((invoice) => invoice.polName))].sort();
@@ -1934,32 +1935,46 @@ function Invoices({
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
-  const loadNextInvoicePage = useCallback(async () => {
-    if (invoicePageRequestLock.current || loadingMore || (loadedInvoiceCount >= invoiceTotal && loadedInvoiceCount > 0)) return;
+  const loadNextInvoicePage = useCallback(async (reset = false) => {
+    if (!reset && (invoicePageRequestLock.current || loadingMore || (loadedInvoiceCount >= invoiceTotal && loadedInvoiceCount > 0))) return;
+    const requestSequence = ++invoicePageRequestSequence.current;
     invoicePageRequestLock.current = true;
     setLoadingMore(true);
     setLoadMoreError("");
     try {
-      const nextPage = await onLoadMore(loadedInvoiceCount);
+      const offset = reset ? 0 : loadedInvoiceCount;
+      const nextPage = await onLoadMore(offset, filters.vendorInvoiceStatus || "all");
+      if (requestSequence !== invoicePageRequestSequence.current) return;
       setAdditionalInvoices((current) => {
+        if (reset) return nextPage.items;
         const existing = new Set([...invoices.slice(0, 20), ...current].map((invoice) => invoice.id));
         return [...current, ...nextPage.items.filter((invoice) => !existing.has(invoice.id))];
       });
-      setLoadedInvoiceCount(Math.min(nextPage.total, loadedInvoiceCount + nextPage.items.length));
+      setLoadedInvoiceCount(Math.min(nextPage.total, offset + nextPage.items.length));
       setInvoiceTotal(nextPage.total);
     } catch {
-      setLoadMoreError("Could not load more invoices. Try again.");
+      if (requestSequence === invoicePageRequestSequence.current) setLoadMoreError("Could not load more invoices. Try again.");
     } finally {
-      invoicePageRequestLock.current = false;
-      setLoadingMore(false);
+      if (requestSequence === invoicePageRequestSequence.current) {
+        invoicePageRequestLock.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, [loadingMore, loadedInvoiceCount, invoiceTotal, onLoadMore, invoices]);
+  }, [filters.vendorInvoiceStatus, loadingMore, loadedInvoiceCount, invoiceTotal, onLoadMore, invoices]);
 
   useEffect(() => {
-    if (invoices.length || firstInvoicePageRequested.current) return;
-    firstInvoicePageRequested.current = true;
-    void loadNextInvoicePage();
-  }, [invoices.length, loadNextInvoicePage]);
+    if (!filtersLoaded || initializedVendorInvoiceFilter.current === filters.vendorInvoiceStatus) return;
+    initializedVendorInvoiceFilter.current = filters.vendorInvoiceStatus;
+    setAdditionalInvoices([]);
+    setLoadedInvoiceCount(0);
+    setInvoiceTotal(0);
+    if (!filters.vendorInvoiceStatus && invoices.length) {
+      setLoadedInvoiceCount(Math.min(20, invoices.length));
+      setInvoiceTotal(invoices.length);
+      return;
+    }
+    void loadNextInvoicePage(true);
+  }, [filtersLoaded, filters.vendorInvoiceStatus, invoices.length, loadNextInvoicePage]);
 
   useEffect(() => {
     const target = loadMoreTarget.current;
@@ -2101,6 +2116,17 @@ function Invoices({
               </select>
             </label>
             <label>
+              <span>Vendor invoice</span>
+              <select
+                value={filters.vendorInvoiceStatus}
+                onChange={(event) => updateFilter("vendorInvoiceStatus", event.target.value as InvoiceFilters["vendorInvoiceStatus"])}
+              >
+                <option value="">All invoices</option>
+                <option value="linked">Has vendor invoice</option>
+                <option value="missing">Missing vendor invoice</option>
+              </select>
+            </label>
+            <label>
               <span>POL</span>
               <select value={filters.pol} onChange={(event) => updateFilter("pol", event.target.value)}>
                 <option value="">All loading ports</option>
@@ -2138,7 +2164,7 @@ function Invoices({
             </button>
           ))}
           {!filteredInvoices.length && (
-            <p className="empty-inline">{loadingMore && loadedInvoiceCount === 0 ? "Loading invoices…" : "No loaded invoices match these filters yet."}</p>
+            <p className="empty-inline">{loadingMore && loadedInvoiceCount === 0 ? "Loading invoices…" : filters.vendorInvoiceStatus && invoiceTotal === 0 ? "No invoices match this vendor invoice filter." : "No loaded invoices match these filters yet."}</p>
           )}
           <div ref={loadMoreTarget} className="list-load-more" aria-live="polite">{loadingMore ? "Loading more invoices…" : loadMoreError ? <button className="link-button" type="button" onClick={() => void loadNextInvoicePage()}>{loadMoreError}</button> : loadedInvoiceCount < invoiceTotal ? "Scroll to load more invoices" : "All invoices loaded"}</div>
         </div>

@@ -87,7 +87,10 @@ export const api = {
   saveCharge: (s: Session, id: string, value: CreateCharge) => call<JobDetail>(s, `/jobs/${id}/charges`, { method: "POST", body: JSON.stringify(value) }),
   removeCharge: (s: Session, id: string, chargeId: string) => call<JobDetail>(s, `/jobs/${id}/charges/${chargeId}`, { method: "DELETE" }),
   invoices: (s: Session) => call<Invoice[]>(s, "/invoices"),
-  invoicePage: (s: Session, offset: number, limit = 20) => call<RecordPage<Invoice>>(s, `/invoices/page?offset=${offset}&limit=${limit}`),
+  invoicePage: (s: Session, offset: number, limit = 20, vendorInvoice: "all" | "linked" | "missing" = "all") => {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit), vendorInvoice });
+    return call<RecordPage<Invoice>>(s, `/invoices/page?${params.toString()}`);
+  },
   invoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}`),
   createDraft: (s: Session, jobId: string, chargeIds: string[]) => call<Invoice>(s, "/invoices/drafts", { method: "POST", body: JSON.stringify({ jobId, chargeIds }) }),
   issueInvoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}/issue`, { method: "POST" }),
