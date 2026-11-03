@@ -2289,11 +2289,9 @@ function Invoices({
             {canManageVendorInvoices && (
               <>
                 {relatedVendorBills.length ? relatedVendorBills.map((bill) => {
-                  const relation = invoiceVendorBillRelation(selected, bill);
-                  const label = relation === "linked" ? "View vendor invoice" : relation === "bill-of-lading" ? "View vendor invoice (B/L match)" : "View vendor invoice for this job";
                   return (
                   <button className="soft" type="button" key={bill.id} onClick={() => onOpenVendorBill(bill.id)}>
-                    {label}: {bill.vendorInvoiceNumber}
+                    View vendor invoice
                   </button>
                   );
                 }) : <button className="soft" type="button" onClick={onAddVendorInvoice}>
