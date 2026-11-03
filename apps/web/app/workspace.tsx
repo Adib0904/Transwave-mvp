@@ -2159,6 +2159,7 @@ function Invoices({
               <b>{i.invoiceNumber || i.draftReference}</b>
               <span>{i.customerName}</span>
               {blLabels(i) && <small>{blLabels(i)}</small>}
+              {i.vessel && <small>Vessel: {i.vessel}</small>}
               <Tag text={i.paymentStatus === "PAID" ? "PAID" : i.status} />
               <strong>{money.format(Number(i.total))}</strong>
             </button>
