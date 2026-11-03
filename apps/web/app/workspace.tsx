@@ -912,7 +912,7 @@ export function Workspace() {
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
             canManageVendorInvoices={canManageBilling}
-            relatedVendorBill={selectedInvoice ? vendorBills.find((bill) => bill.jobId === selectedInvoice.jobId) ?? null : null}
+            relatedVendorBills={selectedInvoice ? vendorBills.filter((bill) => bill.customerInvoiceId === selectedInvoice.id) : []}
             onEdit={() => setDialog("invoiceEdit")}
             onAddVendorInvoice={() => selectedInvoice && openVendorInvoiceForInvoice(selectedInvoice)}
             onOpenVendorBill={openVendorBill}
@@ -1877,7 +1877,7 @@ function Invoices({
   canIssue,
   canCreateSimilar,
   canManageVendorInvoices,
-  relatedVendorBill,
+  relatedVendorBills,
   onOpen,
   onCreateSimilar,
   onAddVendorInvoice,
@@ -1894,7 +1894,7 @@ function Invoices({
   canIssue: boolean;
   canCreateSimilar: boolean;
   canManageVendorInvoices: boolean;
-  relatedVendorBill: VendorBill | null;
+  relatedVendorBills: VendorBill[];
   onOpen(id: string): void;
   onCreateSimilar(): void;
   onAddVendorInvoice(): void;
@@ -2266,15 +2266,18 @@ function Invoices({
             </strong>
           </div>
           <div className="form-actions">
-            {canManageVendorInvoices && (relatedVendorBill ? (
-              <button className="soft" type="button" onClick={() => onOpenVendorBill(relatedVendorBill.id)}>
-                View vendor invoice
-              </button>
-            ) : (
+            {canManageVendorInvoices && (
+              <>
+                {relatedVendorBills.map((bill) => (
+                  <button className="soft" type="button" key={bill.id} onClick={() => onOpenVendorBill(bill.id)}>
+                    View vendor invoice: {bill.vendorInvoiceNumber}
+                  </button>
+                ))}
               <button className="soft" type="button" onClick={onAddVendorInvoice}>
                 + Vendor invoice
               </button>
-            ))}
+              </>
+            )}
             {canIssue && selected.status === "ISSUED" && selected.paymentStatus === "UNPAID" && (
               <button
                 className="button"
