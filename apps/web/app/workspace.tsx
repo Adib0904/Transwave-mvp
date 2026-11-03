@@ -84,7 +84,7 @@ const pageDataScopes: Record<Page, RefreshScope[]> = {
   Dashboard: ["masters", "jobs", "invoices"],
   Customers: ["masters"],
   Jobs: ["masters", "jobs"],
-  Invoices: ["masters"],
+  Invoices: ["masters", "vendorBills"],
   Costs: ["masters", "jobs", "invoices"],
   Masters: ["masters"],
   Users: ["masters", "users"],
