@@ -208,12 +208,11 @@ const normalizedBl = (value: string | null | undefined) =>
   value?.replace(/[^a-z\d]/gi, "").toUpperCase() ?? "";
 function invoiceVendorBillRelation(invoice: Invoice, bill: VendorBill): "linked" | "bill-of-lading" | "job" | "other-invoice" | null {
   if (bill.customerInvoiceId === invoice.id) return "linked";
-  if (bill.jobId !== invoice.jobId) return null;
-  if (bill.customerInvoiceId) return "other-invoice";
+  if (bill.customerInvoiceId) return bill.jobId === invoice.jobId ? "other-invoice" : null;
   if (bill.blNumber && [invoice.hbl, invoice.mbl].some((value) => normalizedBl(value) === normalizedBl(bill.blNumber))) {
     return "bill-of-lading";
   }
-  return "job";
+  return bill.jobId === invoice.jobId ? "job" : null;
 }
 const message = (reason: unknown) =>
   reason instanceof Error
@@ -922,7 +921,7 @@ export function Workspace() {
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
             canManageVendorInvoices={canManageBilling}
-            relatedVendorBills={selectedInvoice ? vendorBills.filter((bill) => bill.jobId === selectedInvoice.jobId) : []}
+            relatedVendorBills={selectedInvoice ? vendorBills.filter((bill) => invoiceVendorBillRelation(selectedInvoice, bill)) : []}
             onEdit={() => setDialog("invoiceEdit")}
             onAddVendorInvoice={() => selectedInvoice && openVendorInvoiceForInvoice(selectedInvoice)}
             onOpenVendorBill={openVendorBill}

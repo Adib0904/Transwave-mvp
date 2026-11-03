@@ -37,19 +37,48 @@ export class InvoicesService {
       .range(safeOffset, safeOffset + safeLimit - 1);
     if (tenant.role !== "OWNER" && tenant.role !== "ADMIN") query = query.eq("created_by", userId);
     if (vendorInvoice !== "all") {
-      const linkedResult = await database.from("vendor_bills")
-        .select("customer_invoice_id")
-        .eq("company_id", tenant.companyId)
-        .not("customer_invoice_id", "is", null);
-      if (linkedResult.error) throwDatabaseError(linkedResult.error);
-      const linkedInvoiceIds = [...new Set((linkedResult.data ?? [])
-        .map((bill) => bill.customer_invoice_id)
-        .filter((id): id is string => Boolean(id)))];
+      let visibleInvoicesQuery = database.from("invoices")
+        .select("id, job_id, hbl_snapshot, mbl_snapshot")
+        .eq("company_id", tenant.companyId);
+      if (tenant.role !== "OWNER" && tenant.role !== "ADMIN") visibleInvoicesQuery = visibleInvoicesQuery.eq("created_by", userId);
+      const [visibleInvoicesResult, billsResult] = await Promise.all([
+        visibleInvoicesQuery,
+        database.from("vendor_bills")
+          .select("customer_invoice_id, job_id, bl_number")
+          .eq("company_id", tenant.companyId),
+      ]);
+      if (visibleInvoicesResult.error) throwDatabaseError(visibleInvoicesResult.error);
+      if (billsResult.error) throwDatabaseError(billsResult.error);
+      const visibleInvoices = visibleInvoicesResult.data ?? [];
+      const invoicesByJob = new Map<string, typeof visibleInvoices>();
+      for (const invoice of visibleInvoices) {
+        const jobInvoices = invoicesByJob.get(invoice.job_id) ?? [];
+        jobInvoices.push(invoice);
+        invoicesByJob.set(invoice.job_id, jobInvoices);
+      }
+      const normalizeBl = (value: string | null | undefined) => value?.replace(/[^a-z\d]/gi, "").toUpperCase() ?? "";
+      const linkedInvoiceIds = new Set<string>();
+      for (const bill of billsResult.data ?? []) {
+        if (bill.customer_invoice_id) {
+          linkedInvoiceIds.add(bill.customer_invoice_id);
+          continue;
+        }
+        const jobInvoices = invoicesByJob.get(bill.job_id) ?? [];
+        const billBl = normalizeBl(bill.bl_number);
+        if (billBl) {
+          for (const invoice of jobInvoices) {
+            if ([invoice.hbl_snapshot, invoice.mbl_snapshot].some((value) => normalizeBl(value) === billBl)) linkedInvoiceIds.add(invoice.id);
+          }
+        } else if (jobInvoices.length === 1) {
+          linkedInvoiceIds.add(jobInvoices[0].id);
+        }
+      }
+      const linkedIds = [...linkedInvoiceIds];
       if (vendorInvoice === "linked") {
-        if (!linkedInvoiceIds.length) return { items: [], total: 0, offset: safeOffset, limit: safeLimit, hasMore: false };
-        query = query.in("id", linkedInvoiceIds);
-      } else if (linkedInvoiceIds.length) {
-        query = query.not("id", "in", `(${linkedInvoiceIds.join(",")})`);
+        if (!linkedIds.length) return { items: [], total: 0, offset: safeOffset, limit: safeLimit, hasMore: false };
+        query = query.in("id", linkedIds);
+      } else if (linkedIds.length) {
+        query = query.not("id", "in", `(${linkedIds.join(",")})`);
       }
     }
     const { data, error, count } = await query;
