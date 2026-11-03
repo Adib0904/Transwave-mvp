@@ -206,6 +206,15 @@ const blLabels = (record: { hbl?: string | null; mbl?: string | null }) =>
     .join(" · ");
 const normalizedBl = (value: string | null | undefined) =>
   value?.replace(/[^a-z\d]/gi, "").toUpperCase() ?? "";
+function invoiceVendorBillRelation(invoice: Invoice, bill: VendorBill): "linked" | "bill-of-lading" | "job" | "other-invoice" | null {
+  if (bill.customerInvoiceId === invoice.id) return "linked";
+  if (bill.jobId !== invoice.jobId) return null;
+  if (bill.customerInvoiceId) return "other-invoice";
+  if (bill.blNumber && [invoice.hbl, invoice.mbl].some((value) => normalizedBl(value) === normalizedBl(bill.blNumber))) {
+    return "bill-of-lading";
+  }
+  return "job";
+}
 const message = (reason: unknown) =>
   reason instanceof Error
     ? reason.message
@@ -908,11 +917,12 @@ export function Workspace() {
             viewStateKey={`transwave:${user.userId}:invoices`}
             invoices={invoices}
             onLoadMore={(offset, vendorInvoice) => api.invoicePage(session, offset, 20, vendorInvoice)}
+            bills={vendorBills}
             selected={record?.section === "invoices" ? selectedInvoice : null}
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
             canManageVendorInvoices={canManageBilling}
-            relatedVendorBills={selectedInvoice ? vendorBills.filter((bill) => bill.customerInvoiceId === selectedInvoice.id) : []}
+            relatedVendorBills={selectedInvoice ? vendorBills.filter((bill) => bill.jobId === selectedInvoice.jobId) : []}
             onEdit={() => setDialog("invoiceEdit")}
             onAddVendorInvoice={() => selectedInvoice && openVendorInvoiceForInvoice(selectedInvoice)}
             onOpenVendorBill={openVendorBill}
@@ -1873,6 +1883,7 @@ function Invoices({
   viewStateKey,
   invoices,
   onLoadMore,
+  bills,
   selected,
   canIssue,
   canCreateSimilar,
@@ -1890,6 +1901,7 @@ function Invoices({
   viewStateKey: string;
   invoices: Invoice[];
   onLoadMore(offset: number, vendorInvoice: "all" | "linked" | "missing"): Promise<RecordPage<Invoice>>;
+  bills: VendorBill[];
   selected: Invoice | null;
   canIssue: boolean;
   canCreateSimilar: boolean;
@@ -2150,8 +2162,9 @@ function Invoices({
           <span className="invoice-results-count">{filteredInvoices.length}</span>
         </div>
         <div className="invoice-list">
-          {filteredInvoices.map((i) => (
-            <button
+          {filteredInvoices.map((i) => {
+            const relatedBills = bills.filter((bill) => invoiceVendorBillRelation(i, bill));
+            return <button
               className={selected?.id === i.id ? "invoice selected" : "invoice"}
               key={i.id}
               onClick={() => onOpen(i.id)}
@@ -2160,10 +2173,15 @@ function Invoices({
               <span>{i.customerName}</span>
               {blLabels(i) && <small>{blLabels(i)}</small>}
               {i.vessel && <small>Vessel: {i.vessel}</small>}
+              {relatedBills.length > 0 && <small>{relatedBills.map((bill) => {
+                const relation = invoiceVendorBillRelation(i, bill);
+                const label = relation === "linked" ? "Vendor invoice" : relation === "bill-of-lading" ? "Vendor invoice · B/L match" : relation === "other-invoice" ? `Vendor invoice · linked to ${bill.customerInvoiceNumber || "another invoice"}` : "Vendor invoice · same job";
+                return `${label}: ${bill.vendorInvoiceNumber}`;
+              }).join(" · ")}</small>}
               <Tag text={i.paymentStatus === "PAID" ? "PAID" : i.status} />
               <strong>{money.format(Number(i.total))}</strong>
-            </button>
-          ))}
+            </button>;
+          })}
           {!filteredInvoices.length && (
             <p className="empty-inline">{loadingMore && loadedInvoiceCount === 0 ? "Loading invoices…" : filters.vendorInvoiceStatus && invoiceTotal === 0 ? "No invoices match this vendor invoice filter." : "No loaded invoices match these filters yet."}</p>
           )}
@@ -2268,11 +2286,15 @@ function Invoices({
           <div className="form-actions">
             {canManageVendorInvoices && (
               <>
-                {relatedVendorBills.map((bill) => (
+                {relatedVendorBills.map((bill) => {
+                  const relation = invoiceVendorBillRelation(selected, bill);
+                  const label = relation === "linked" ? "View linked vendor invoice" : relation === "bill-of-lading" ? "View vendor invoice (B/L match)" : relation === "other-invoice" ? `View vendor invoice linked to ${bill.customerInvoiceNumber || "another invoice"}` : "View vendor invoice for this job";
+                  return (
                   <button className="soft" type="button" key={bill.id} onClick={() => onOpenVendorBill(bill.id)}>
-                    View vendor invoice: {bill.vendorInvoiceNumber}
+                    {label}: {bill.vendorInvoiceNumber}
                   </button>
-                ))}
+                  );
+                })}
               <button className="soft" type="button" onClick={onAddVendorInvoice}>
                 + Vendor invoice
               </button>
