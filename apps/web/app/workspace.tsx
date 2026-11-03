@@ -206,6 +206,14 @@ const blLabels = (record: { hbl?: string | null; mbl?: string | null }) =>
     .join(" · ");
 const normalizedBl = (value: string | null | undefined) =>
   value?.replace(/[^a-z\d]/gi, "").toUpperCase() ?? "";
+function invoiceVendorBillRelation(invoice: Invoice, bill: VendorBill): "linked" | "bill-of-lading" | "job" | "other-invoice" | null {
+  if (bill.customerInvoiceId === invoice.id) return "linked";
+  if (bill.customerInvoiceId) return bill.jobId === invoice.jobId ? "other-invoice" : null;
+  if (bill.blNumber && [invoice.hbl, invoice.mbl].some((value) => normalizedBl(value) === normalizedBl(bill.blNumber))) {
+    return "bill-of-lading";
+  }
+  return bill.jobId === invoice.jobId ? "job" : null;
+}
 const message = (reason: unknown) =>
   reason instanceof Error
     ? reason.message
@@ -908,11 +916,15 @@ export function Workspace() {
             viewStateKey={`transwave:${user.userId}:invoices`}
             invoices={invoices}
             onLoadMore={(offset, vendorInvoice) => api.invoicePage(session, offset, 20, vendorInvoice)}
+            bills={vendorBills}
             selected={record?.section === "invoices" ? selectedInvoice : null}
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
             canManageVendorInvoices={canManageBilling}
-            relatedVendorBill={selectedInvoice ? vendorBills.find((bill) => bill.jobId === selectedInvoice.jobId) ?? null : null}
+            relatedVendorBills={selectedInvoice ? vendorBills.filter((bill) => {
+              const relation = invoiceVendorBillRelation(selectedInvoice, bill);
+              return relation !== null && relation !== "other-invoice";
+            }) : []}
             onEdit={() => setDialog("invoiceEdit")}
             onAddVendorInvoice={() => selectedInvoice && openVendorInvoiceForInvoice(selectedInvoice)}
             onOpenVendorBill={openVendorBill}
@@ -1873,11 +1885,12 @@ function Invoices({
   viewStateKey,
   invoices,
   onLoadMore,
+  bills,
   selected,
   canIssue,
   canCreateSimilar,
   canManageVendorInvoices,
-  relatedVendorBill,
+  relatedVendorBills,
   onOpen,
   onCreateSimilar,
   onAddVendorInvoice,
@@ -1890,11 +1903,12 @@ function Invoices({
   viewStateKey: string;
   invoices: Invoice[];
   onLoadMore(offset: number, vendorInvoice: "all" | "linked" | "missing"): Promise<RecordPage<Invoice>>;
+  bills: VendorBill[];
   selected: Invoice | null;
   canIssue: boolean;
   canCreateSimilar: boolean;
   canManageVendorInvoices: boolean;
-  relatedVendorBill: VendorBill | null;
+  relatedVendorBills: VendorBill[];
   onOpen(id: string): void;
   onCreateSimilar(): void;
   onAddVendorInvoice(): void;
@@ -2150,8 +2164,9 @@ function Invoices({
           <span className="invoice-results-count">{filteredInvoices.length}</span>
         </div>
         <div className="invoice-list">
-          {filteredInvoices.map((i) => (
-            <button
+          {filteredInvoices.map((i) => {
+            const relatedBills = bills.filter((bill) => invoiceVendorBillRelation(i, bill));
+            return <button
               className={selected?.id === i.id ? "invoice selected" : "invoice"}
               key={i.id}
               onClick={() => onOpen(i.id)}
@@ -2159,10 +2174,16 @@ function Invoices({
               <b>{i.invoiceNumber || i.draftReference}</b>
               <span>{i.customerName}</span>
               {blLabels(i) && <small>{blLabels(i)}</small>}
+              {i.vessel && <small>Vessel: {i.vessel}</small>}
+              {relatedBills.length > 0 && <small>{relatedBills.map((bill) => {
+                const relation = invoiceVendorBillRelation(i, bill);
+                const label = relation === "linked" ? "Vendor invoice" : relation === "bill-of-lading" ? "Vendor invoice · B/L match" : relation === "other-invoice" ? `Vendor invoice · linked to ${bill.customerInvoiceNumber || "another invoice"}` : "Vendor invoice · same job";
+                return `${label}: ${bill.vendorInvoiceNumber}`;
+              }).join(" · ")}</small>}
               <Tag text={i.paymentStatus === "PAID" ? "PAID" : i.status} />
               <strong>{money.format(Number(i.total))}</strong>
-            </button>
-          ))}
+            </button>;
+          })}
           {!filteredInvoices.length && (
             <p className="empty-inline">{loadingMore && loadedInvoiceCount === 0 ? "Loading invoices…" : filters.vendorInvoiceStatus && invoiceTotal === 0 ? "No invoices match this vendor invoice filter." : "No loaded invoices match these filters yet."}</p>
           )}
@@ -2265,15 +2286,21 @@ function Invoices({
             </strong>
           </div>
           <div className="form-actions">
-            {canManageVendorInvoices && (relatedVendorBill ? (
-              <button className="soft" type="button" onClick={() => onOpenVendorBill(relatedVendorBill.id)}>
-                View vendor invoice
-              </button>
-            ) : (
-              <button className="soft" type="button" onClick={onAddVendorInvoice}>
-                + Vendor invoice
-              </button>
-            ))}
+            {canManageVendorInvoices && (
+              <>
+                {relatedVendorBills.length ? relatedVendorBills.map((bill) => {
+                  const relation = invoiceVendorBillRelation(selected, bill);
+                  const label = relation === "linked" ? "View vendor invoice" : relation === "bill-of-lading" ? "View vendor invoice (B/L match)" : "View vendor invoice for this job";
+                  return (
+                  <button className="soft" type="button" key={bill.id} onClick={() => onOpenVendorBill(bill.id)}>
+                    {label}: {bill.vendorInvoiceNumber}
+                  </button>
+                  );
+                }) : <button className="soft" type="button" onClick={onAddVendorInvoice}>
+                  + Vendor invoice
+                </button>}
+              </>
+            )}
             {canIssue && selected.status === "ISSUED" && selected.paymentStatus === "UNPAID" && (
               <button
                 className="button"
