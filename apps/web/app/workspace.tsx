@@ -921,7 +921,10 @@ export function Workspace() {
             canIssue={canManageBilling}
             canCreateSimilar={canManageOperations}
             canManageVendorInvoices={canManageBilling}
-            relatedVendorBills={selectedInvoice ? vendorBills.filter((bill) => invoiceVendorBillRelation(selectedInvoice, bill)) : []}
+            relatedVendorBills={selectedInvoice ? vendorBills.filter((bill) => {
+              const relation = invoiceVendorBillRelation(selectedInvoice, bill);
+              return relation !== null && relation !== "other-invoice";
+            }) : []}
             onEdit={() => setDialog("invoiceEdit")}
             onAddVendorInvoice={() => selectedInvoice && openVendorInvoiceForInvoice(selectedInvoice)}
             onOpenVendorBill={openVendorBill}
@@ -2285,18 +2288,17 @@ function Invoices({
           <div className="form-actions">
             {canManageVendorInvoices && (
               <>
-                {relatedVendorBills.map((bill) => {
+                {relatedVendorBills.length ? relatedVendorBills.map((bill) => {
                   const relation = invoiceVendorBillRelation(selected, bill);
-                  const label = relation === "linked" ? "View linked vendor invoice" : relation === "bill-of-lading" ? "View vendor invoice (B/L match)" : relation === "other-invoice" ? `View vendor invoice linked to ${bill.customerInvoiceNumber || "another invoice"}` : "View vendor invoice for this job";
+                  const label = relation === "linked" ? "View vendor invoice" : relation === "bill-of-lading" ? "View vendor invoice (B/L match)" : "View vendor invoice for this job";
                   return (
                   <button className="soft" type="button" key={bill.id} onClick={() => onOpenVendorBill(bill.id)}>
                     {label}: {bill.vendorInvoiceNumber}
                   </button>
                   );
-                })}
-              <button className="soft" type="button" onClick={onAddVendorInvoice}>
-                + Vendor invoice
-              </button>
+                }) : <button className="soft" type="button" onClick={onAddVendorInvoice}>
+                  + Vendor invoice
+                </button>}
               </>
             )}
             {canIssue && selected.status === "ISSUED" && selected.paymentStatus === "UNPAID" && (
