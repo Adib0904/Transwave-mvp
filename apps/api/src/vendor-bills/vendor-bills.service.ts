@@ -22,22 +22,22 @@ export class VendorBillsService {
     if (!jobIds.length) return { year, months, allTime: { revenueAed: 0, expenseAed: 0, profitAed: 0 } };
 
     const invoicesResult = await database.from("invoices")
-      .select("id, invoice_date, subtotal_aed")
+      .select("id, payment_date, subtotal_aed")
       .in("job_id", jobIds)
       .eq("status", "ISSUED")
-      .not("invoice_date", "is", null);
+      .not("payment_date", "is", null);
     if (invoicesResult.error) throwDatabaseError(invoicesResult.error);
     const invoices = invoicesResult.data ?? [];
     const invoiceMonthById = new Map<string, number>();
     let allTimeRevenue = 0;
     for (const invoice of invoices) {
-      if (!invoice.invoice_date) continue;
-      const invoiceYear = Number(invoice.invoice_date.slice(0, 4));
-      const month = Number(invoice.invoice_date.slice(5, 7));
-      invoiceMonthById.set(invoice.id, invoiceYear === year ? month : 0);
+      if (!invoice.payment_date) continue;
+      const paymentYear = Number(invoice.payment_date.slice(0, 4));
+      const month = Number(invoice.payment_date.slice(5, 7));
+      invoiceMonthById.set(invoice.id, paymentYear === year ? month : 0);
       const revenue = Number(invoice.subtotal_aed ?? 0);
       allTimeRevenue += revenue;
-      if (invoiceYear === year) months[month - 1]!.revenueAed += revenue;
+      if (paymentYear === year) months[month - 1]!.revenueAed += revenue;
     }
 
     const invoiceIds = [...invoiceMonthById.keys()];

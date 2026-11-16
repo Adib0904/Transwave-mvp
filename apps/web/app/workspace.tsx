@@ -2564,7 +2564,7 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
     {!detailOnly && <section className="panel cost-profit-panel">
       <div className="panel-head cost-profit-heading">
-        <div><h2>Profit and costs</h2><p>{profitPeriodLabel} · AED · amounts before VAT</p></div>
+        <div><h2>Profit and costs</h2><p>{profitPeriodLabel} · paid invoices by payment date · AED before VAT</p></div>
         <div className="cost-profit-controls">
           <div className="dashboard-period-switch" role="group" aria-label="Cost reporting period">
             {(["month", "year", "all"] as const).map((period) => <button key={period} type="button" className={profitPeriod === period ? "active" : ""} aria-pressed={profitPeriod === period} onClick={() => updateViewState("profitPeriod", period)}>{period === "month" ? "Monthly" : period === "year" ? "Yearly" : "All time"}</button>)}
@@ -2576,7 +2576,7 @@ function Costs({ viewStateKey, bills, onLoadMore, onLoadProfitTrend, invoices, v
         </div>
       </div>
       <div className="metrics cost-metrics">
-        <Metric label="Allocated income" value={money.format(periodRevenue)} note="Customer invoice income · before VAT" />
+        <Metric label="Collected income" value={money.format(periodRevenue)} note="Paid customer invoices · by payment date · before VAT" />
         <Metric label="Vendor expense" value={money.format(periodExpense)} note="Linked vendor costs · before VAT" />
         <Metric label="Gross profit" value={money.format(periodProfit)} note="Income minus vendor expense" good={periodProfit >= 0} />
         <Metric label="Gross margin" value={`${periodMargin.toFixed(1)}%`} note="On allocated income" good={periodMargin >= 0} />
@@ -4337,6 +4337,7 @@ function InvoiceEditDialog({
           <h3>Invoice charges</h3>
           {lines.map((line, index) => {
             const tax = taxes.find((item) => item.id === line.taxRateId);
+            const serviceName = invoice.lines.find((item) => item.id === line.id)?.serviceName || "Invoice service";
             const amounts = chargeAmounts(
               Number(line.quantity),
               Number(line.unitRate),
@@ -4345,7 +4346,16 @@ function InvoiceEditDialog({
             );
             return (
               <section className="invoice-edit-line" key={line.id}>
-                <b>{invoice.lines[index]?.serviceName}</b>
+                <div className="invoice-edit-line-heading">
+                  <b>{serviceName}</b>
+                  <button
+                    type="button"
+                    className="danger-link"
+                    disabled={lines.length <= 1}
+                    aria-label={`Remove ${serviceName} service`}
+                    onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}
+                  >Remove service</button>
+                </div>
                 <Field label="Description">
                   <input required value={line.description} onChange={(event) => updateLine(index, "description", event.target.value)} />
                 </Field>
