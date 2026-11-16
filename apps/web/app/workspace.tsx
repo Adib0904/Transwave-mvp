@@ -4173,7 +4173,7 @@ function InvoiceEditDialog({
           save({
             invoiceDate: String(data.get("invoiceDate")),
             dueDate: nullable(data, "dueDate"),
-            paymentDate: invoice.paymentDate,
+            paymentDate: nullable(data, "paymentDate"),
             customerName,
             customerTrn: customerTrn.trim() || null,
             customerVatNumber: customerVatNumber.trim() || null,
@@ -4211,7 +4211,7 @@ function InvoiceEditDialog({
         }}
       >
         <p className="form-help">
-          The invoice number, payment status, and payment date are managed separately. Invoice revisions are audit logged.
+          The invoice number is fixed. For issued invoices, set or change the payment received date here. Invoice revisions are audit logged.
         </p>
         <div className="two">
           <Field label="Invoice date">
@@ -4226,6 +4226,19 @@ function InvoiceEditDialog({
             <input name="dueDate" type="date" defaultValue={invoice.dueDate || ""} />
           </Field>
         </div>
+        <Field label="Payment received date">
+          <input
+            name="paymentDate"
+            type="date"
+            disabled={invoice.status !== "ISSUED"}
+            defaultValue={invoice.paymentDate || ""}
+          />
+          <small className="input-help">
+            {invoice.status === "ISSUED"
+              ? "Set a date to mark this invoice paid, or change the date it was received. Leave blank if it is unpaid."
+              : "Payment can be recorded after the invoice is issued."}
+          </small>
+        </Field>
         <Field label="Select billing customer">
           <select value={customerId} onChange={(event) => selectCustomer(event.target.value)}>
             <option value="">Use custom invoice details</option>
