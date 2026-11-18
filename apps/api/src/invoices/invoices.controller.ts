@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Inject, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import { createDraftSchema, markInvoicePaidSchema, updateInvoiceSchema, type CreateDraft, type MarkInvoicePaid, type UpdateInvoice } from "@transwave/contracts";
+import { createDraftSchema, invoiceProfitInputSchema, markInvoicePaidSchema, updateInvoiceSchema, type CreateDraft, type InvoiceProfitInput, type MarkInvoicePaid, type UpdateInvoice } from "@transwave/contracts";
 import type { AuthenticatedRequest } from "../auth/authenticated-request.js";
 import { SupabaseAuthGuard } from "../auth/supabase-auth.guard.js";
 import { ZodValidationPipe } from "../common/zod-validation.pipe.js";
@@ -25,10 +25,28 @@ export class InvoicesController {
     return this.invoices.listPage(request.database, request.auth.userId, Number(offset ?? 0), Number(limit ?? 20), vendorInvoice ?? "all");
   }
 
+  @Get("commission-report")
+  @ApiOperation({ summary: "Get internal agent commission and company profit report" })
+  commissionReport(@Req() request: AuthenticatedRequest, @Query("fromDate") fromDate?: string, @Query("toDate") toDate?: string, @Query("agent") agent?: string, @Query("dateBasis") dateBasis?: string) {
+    return this.invoices.commissionReport(request.database, request.auth.userId, fromDate, toDate, agent, dateBasis);
+  }
+
+  @Get("agents")
+  @ApiOperation({ summary: "List previously used invoice agents for selection" })
+  agents(@Req() request: AuthenticatedRequest) {
+    return this.invoices.listAgents(request.database, request.auth.userId);
+  }
+
   @Get(":id")
   @ApiOperation({ summary: "Get an invoice and its lines" })
   findOne(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string) {
     return this.invoices.findOne(request.database, id);
+  }
+
+  @Patch(":id/profit")
+  @ApiOperation({ summary: "Save internal invoice buying cost and agent commission snapshots" })
+  saveProfitDetails(@Req() request: AuthenticatedRequest, @Param("id", ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(invoiceProfitInputSchema)) input: InvoiceProfitInput) {
+    return this.invoices.saveProfitDetails(request.database, request.auth.userId, id, input);
   }
 
   @Post("drafts")

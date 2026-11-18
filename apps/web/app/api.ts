@@ -5,6 +5,8 @@ import type {
   CreateManagedUser,
   Customer,
   Invoice,
+  InvoiceProfitInput,
+  InvoiceProfitReport,
   JobDetail,
   JobSummary,
   ManagedUser,
@@ -92,6 +94,16 @@ export const api = {
     return call<RecordPage<Invoice>>(s, `/invoices/page?${params.toString()}`);
   },
   invoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}`),
+  invoiceAgents: (s: Session) => call<string[]>(s, "/invoices/agents"),
+  invoiceCommissionReport: (s: Session, filters: { fromDate?: string; toDate?: string; agent?: string; dateBasis?: "invoice" | "payment" }) => {
+    const params = new URLSearchParams();
+    if (filters.fromDate) params.set("fromDate", filters.fromDate);
+    if (filters.toDate) params.set("toDate", filters.toDate);
+    if (filters.agent) params.set("agent", filters.agent);
+    if (filters.dateBasis) params.set("dateBasis", filters.dateBasis);
+    return call<InvoiceProfitReport>(s, `/invoices/commission-report?${params.toString()}`);
+  },
+  saveInvoiceProfitDetails: (s: Session, id: string, value: InvoiceProfitInput) => call<Invoice>(s, `/invoices/${id}/profit`, { method: "PATCH", body: JSON.stringify(value) }),
   createDraft: (s: Session, jobId: string, chargeIds: string[]) => call<Invoice>(s, "/invoices/drafts", { method: "POST", body: JSON.stringify({ jobId, chargeIds }) }),
   issueInvoice: (s: Session, id: string) => call<Invoice>(s, `/invoices/${id}/issue`, { method: "POST" }),
   markInvoicePaid: (s: Session, id: string, paymentDate: string) => call<Invoice>(s, `/invoices/${id}/payment`, { method: "PATCH", body: JSON.stringify({ paymentDate }) }),
