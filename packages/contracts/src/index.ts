@@ -10,6 +10,7 @@ export const moneySchema = z
     /^\d+(?:\.\d{1,2})?$/,
     "Use a monetary value with at most two decimals",
   );
+const signedMoneySchema = z.string().regex(/^-?\d+(?:\.\d{1,2})?$/);
 export const currencySchema = z
   .string()
   .length(3)
@@ -496,6 +497,13 @@ export const invoiceLineSchema = z.object({
   netAmount: moneySchema,
   vatAmount: moneySchema,
   totalAmount: moneySchema,
+  profitDetails: z.object({
+    agentName: z.string().nullable(),
+    buyingCostPerContainerAed: moneySchema.nullable(),
+    sellingPricePerContainerAed: moneySchema.nullable(),
+    commissionPerContainerAed: moneySchema,
+    agentCommissions: z.array(z.object({ agentName: z.string(), commissionPerContainerAed: moneySchema })).default([]),
+  }).nullable(),
 });
 
 export const invoiceSchema = z.object({
@@ -509,6 +517,8 @@ export const invoiceSchema = z.object({
   dueDate: z.string().nullable(),
   paymentStatus: invoicePaymentStatusSchema,
   paymentDate: z.string().nullable(),
+  agentName: z.string().nullable(),
+  profitRecorded: z.boolean(),
   companyName: z.string(),
   companyTrn: z.string().nullable(),
   companyAddress: z.string().nullable(),
@@ -564,6 +574,9 @@ export const updateInvoiceLineSchema = z
     exchangeRate: decimalSchema,
     unitRate: moneySchema,
     taxRateId: uuidSchema,
+    buyingCostPerContainerAed: z.union([moneySchema, z.literal(""), z.null()]).transform((value) => value || null).default(null),
+    sellingPricePerContainerAed: z.union([moneySchema, z.literal(""), z.null()]).transform((value) => value || null).default(null),
+    commissionPerContainerAed: moneySchema.default("0.00"),
   })
   .superRefine((value, context) => {
     const rate = Number(value.exchangeRate);
@@ -575,6 +588,63 @@ export const updateInvoiceLineSchema = z
       });
     }
   });
+
+export const invoiceProfitInputSchema = z.object({
+  agentName: z.string().trim().max(160).nullable().default(null),
+  agents: z.array(z.object({
+    agentName: z.string().trim().min(1).max(160),
+    commissionPerContainerAed: moneySchema,
+  })).max(25).optional(),
+  lines: z.array(z.object({
+    invoiceLineId: uuidSchema,
+    buyingCostPerContainerAed: z.union([moneySchema, z.literal(""), z.null()]).transform((value) => value || null).default(null),
+    sellingPricePerContainerAed: z.union([moneySchema, z.literal(""), z.null()]).transform((value) => value || null).default(null),
+    commissionPerContainerAed: moneySchema.default("0.00"),
+  })).min(1).max(100),
+}).superRefine((value, context) => {
+  if (!value.agents && !value.agentName && value.lines.some((line) => Number(line.commissionPerContainerAed) > 0)) {
+    context.addIssue({ code: "custom", path: ["agentName"], message: "Select an agent for a non-zero commission" });
+  }
+  const names = (value.agents ?? []).map((agent) => agent.agentName.toLocaleLowerCase());
+  if (new Set(names).size !== names.length) context.addIssue({ code: "custom", path: ["agents"], message: "Each agent can only be added once" });
+});
+
+export const invoiceProfitReportRowSchema = z.object({
+  invoiceId: uuidSchema,
+  invoiceNumber: z.string(),
+  vendorInvoiceNumbers: z.array(z.string()),
+  invoiceDate: z.string(),
+  customerName: z.string(),
+  agentName: z.string().nullable(),
+  agentNames: z.array(z.string()),
+  agentCommissions: z.array(z.object({ agentName: z.string(), commissionAed: moneySchema })),
+  containerCount: z.number().nonnegative(),
+  buyingCostAed: moneySchema.nullable(),
+  salesRevenueAed: moneySchema,
+  grossProfitAed: signedMoneySchema.nullable(),
+  commissionAed: moneySchema.nullable(),
+  companyPureProfitAed: signedMoneySchema.nullable(),
+  lines: z.array(z.object({
+    invoiceLineId: uuidSchema,
+    serviceName: z.string(),
+    quantity: z.number().nonnegative(),
+    buyingPricePerContainerAed: moneySchema.nullable(),
+    sellingPricePerContainerAed: moneySchema,
+    commissionPerContainerAed: moneySchema.nullable(),
+    buyingCostAed: moneySchema.nullable(),
+    salesRevenueAed: moneySchema,
+    grossProfitAed: signedMoneySchema.nullable(),
+    agentCommissionAed: moneySchema.nullable(),
+    companyPureProfitAed: signedMoneySchema.nullable(),
+    agentCommissions: z.array(z.object({ agentName: z.string(), commissionPerContainerAed: moneySchema, totalCommissionAed: moneySchema })),
+  })),
+});
+export const invoiceProfitReportSchema = z.object({
+  agents: z.array(z.string()),
+  items: z.array(invoiceProfitReportRowSchema),
+  totals: z.object({ containerCount: z.number().nonnegative(), buyingCostAed: moneySchema, salesRevenueAed: moneySchema, grossProfitAed: signedMoneySchema, commissionAed: moneySchema, companyPureProfitAed: signedMoneySchema, unrecordedInvoiceCount: z.number().int().nonnegative(), incompleteBuyingCostInvoiceCount: z.number().int().nonnegative(), incompleteCommissionInvoiceCount: z.number().int().nonnegative() }),
+  byAgent: z.array(z.object({ agentName: z.string(), invoiceCount: z.number().int().nonnegative(), containerCount: z.number().nonnegative(), commissionAed: moneySchema.nullable(), companyPureProfitAed: signedMoneySchema.nullable() })),
+});
 
 export const updateInvoiceSchema = z.object({
   invoiceDate: z.iso.date(),
@@ -612,6 +682,8 @@ export const updateInvoiceSchema = z.object({
   containers: z.array(containerSchema).max(999),
   remarks: z.string().trim().max(1500).nullable().default(null),
   lines: z.array(updateInvoiceLineSchema).min(1).max(100),
+  agentName: z.string().trim().max(160).nullable().default(null),
+  profitDetailsRecorded: z.boolean().default(false),
 }).superRefine((value, context) => {
   if (value.containers.length > value.plannedContainerCount) {
     context.addIssue({
@@ -627,6 +699,9 @@ export const updateInvoiceSchema = z.object({
       path: ["containers"],
       message: "Container numbers must be unique",
     });
+  }
+  if (value.profitDetailsRecorded && !value.agentName && value.lines.some((line) => Number(line.commissionPerContainerAed) > 0)) {
+    context.addIssue({ code: "custom", path: ["agentName"], message: "Select an agent for a non-zero commission" });
   }
 });
 
@@ -760,6 +835,8 @@ export type MonthlyProfitReport = {
   allTime: { revenueAed: number; expenseAed: number; profitAed: number };
 };
 export type UpdateInvoice = z.infer<typeof updateInvoiceSchema>;
+export type InvoiceProfitInput = z.infer<typeof invoiceProfitInputSchema>;
+export type InvoiceProfitReport = z.infer<typeof invoiceProfitReportSchema>;
 export type MarkInvoicePaid = z.infer<typeof markInvoicePaidSchema>;
 export type VendorBill = z.infer<typeof vendorBillSchema>;
 export type SaveVendorBill = z.infer<typeof saveVendorBillSchema>;

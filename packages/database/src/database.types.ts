@@ -266,8 +266,8 @@ export type Database = {
           payment_terms_days: number
           phone: string | null
           trn: string | null
-          vat_number: string | null
           updated_at: string
+          vat_number: string | null
         }
         Insert: {
           active?: boolean
@@ -282,8 +282,8 @@ export type Database = {
           payment_terms_days?: number
           phone?: string | null
           trn?: string | null
-          vat_number?: string | null
           updated_at?: string
+          vat_number?: string | null
         }
         Update: {
           active?: boolean
@@ -298,8 +298,8 @@ export type Database = {
           payment_terms_days?: number
           phone?: string | null
           trn?: string | null
-          vat_number?: string | null
           updated_at?: string
+          vat_number?: string | null
         }
         Relationships: [
           {
@@ -355,6 +355,96 @@ export type Database = {
             columns: ["invoice_id", "company_id"]
             isOneToOne: false
             referencedRelation: "invoices"
+            referencedColumns: ["id", "company_id"]
+          },
+        ]
+      }
+      invoice_line_agent_commissions: {
+        Row: {
+          agent_name_snapshot: string
+          commission_per_container_aed: number
+          company_id: string
+          invoice_id: string
+          invoice_line_id: string
+          recorded_at: string
+        }
+        Insert: {
+          agent_name_snapshot: string
+          commission_per_container_aed: number
+          company_id: string
+          invoice_id: string
+          invoice_line_id: string
+          recorded_at?: string
+        }
+        Update: {
+          agent_name_snapshot?: string
+          commission_per_container_aed?: number
+          company_id?: string
+          invoice_id?: string
+          invoice_line_id?: string
+          recorded_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_line_agent_commissions_invoice_id_company_id_fkey"
+            columns: ["invoice_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "invoice_line_agent_commissions_invoice_line_id_company_id_fkey"
+            columns: ["invoice_line_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_lines"
+            referencedColumns: ["id", "company_id"]
+          },
+        ]
+      }
+      invoice_line_profit_details: {
+        Row: {
+          agent_name_snapshot: string | null
+          buying_cost_per_container_aed: number | null
+          commission_per_container_aed: number
+          company_id: string
+          invoice_id: string
+          invoice_line_id: string
+          recorded_at: string
+          selling_price_per_container_aed: number | null
+        }
+        Insert: {
+          agent_name_snapshot?: string | null
+          buying_cost_per_container_aed?: number | null
+          commission_per_container_aed?: number
+          company_id: string
+          invoice_id: string
+          invoice_line_id: string
+          recorded_at?: string
+          selling_price_per_container_aed?: number | null
+        }
+        Update: {
+          agent_name_snapshot?: string | null
+          buying_cost_per_container_aed?: number | null
+          commission_per_container_aed?: number
+          company_id?: string
+          invoice_id?: string
+          invoice_line_id?: string
+          recorded_at?: string
+          selling_price_per_container_aed?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_line_profit_details_invoice_id_company_id_fkey"
+            columns: ["invoice_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "invoice_line_profit_details_invoice_line_id_company_id_fkey"
+            columns: ["invoice_line_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "invoice_lines"
             referencedColumns: ["id", "company_id"]
           },
         ]
@@ -514,12 +604,12 @@ export type Database = {
           package_count_snapshot: number | null
           payment_date: string | null
           payment_terms_days_snapshot: number
-          remarks: string | null
           place_of_delivery_snapshot: string | null
           planned_container_count_snapshot: number
           planned_container_type_snapshot: string
           pod_snapshot: string
           pol_snapshot: string
+          remarks: string | null
           sailed_at_snapshot: string | null
           sales_person_snapshot: string | null
           shipment_terms_snapshot: string | null
@@ -573,12 +663,12 @@ export type Database = {
           package_count_snapshot?: number | null
           payment_date?: string | null
           payment_terms_days_snapshot: number
-          remarks?: string | null
           place_of_delivery_snapshot?: string | null
           planned_container_count_snapshot: number
           planned_container_type_snapshot: string
           pod_snapshot: string
           pol_snapshot: string
+          remarks?: string | null
           sailed_at_snapshot?: string | null
           sales_person_snapshot?: string | null
           shipment_terms_snapshot?: string | null
@@ -632,12 +722,12 @@ export type Database = {
           package_count_snapshot?: number | null
           payment_date?: string | null
           payment_terms_days_snapshot?: number
-          remarks?: string | null
           place_of_delivery_snapshot?: string | null
           planned_container_count_snapshot?: number
           planned_container_type_snapshot?: string
           pod_snapshot?: string
           pol_snapshot?: string
+          remarks?: string | null
           sailed_at_snapshot?: string | null
           sales_person_snapshot?: string | null
           shipment_terms_snapshot?: string | null
@@ -1209,9 +1299,9 @@ export type Database = {
           date_of_supply: string | null
           department: string | null
           due_date: string | null
-          payment_date: string | null
           id: string
           job_id: string
+          payment_date: string | null
           remarks: string | null
           revenue_allocated_aed: number
           source_file_name: string | null
@@ -1230,9 +1320,9 @@ export type Database = {
           date_of_supply?: string | null
           department?: string | null
           due_date?: string | null
-          payment_date?: string | null
           id?: string
           job_id: string
+          payment_date?: string | null
           remarks?: string | null
           revenue_allocated_aed?: number
           source_file_name?: string | null
@@ -1251,9 +1341,9 @@ export type Database = {
           date_of_supply?: string | null
           department?: string | null
           due_date?: string | null
-          payment_date?: string | null
           id?: string
           job_id?: string
+          payment_date?: string | null
           remarks?: string | null
           revenue_allocated_aed?: number
           source_file_name?: string | null
@@ -1366,6 +1456,10 @@ export type Database = {
         Args: { p_file_name: string; p_id: string; p_storage_path: string }
         Returns: undefined
       }
+      can_view_job: {
+        Args: { target_company_id: string; target_job_id: string }
+        Returns: boolean
+      }
       create_invoice_draft: {
         Args: { p_charge_ids: string[]; p_job_id: string }
         Returns: string
@@ -1437,6 +1531,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      has_invoice_admin_visibility: {
+        Args: { target_company_id: string }
+        Returns: boolean
+      }
       is_company_member: {
         Args: { target_company_id: string }
         Returns: boolean
@@ -1446,20 +1544,12 @@ export type Database = {
         Args: { p_invoice_id: string; p_payment_date: string }
         Returns: string
       }
-      update_invoice: {
-        Args: {
-          p_customer_address: string | null
-          p_customer_name: string
-          p_customer_trn: string | null
-          p_customer_vat_number: string | null
-          p_due_date: string | null
-          p_details: Json
-          p_invoice_date: string
-          p_invoice_id: string
-          p_lines: Json
-          p_payment_date: string | null
-          p_remarks: string | null
-        }
+      save_invoice_profit_details: {
+        Args: { p_agent_name: string; p_invoice_id: string; p_lines: Json }
+        Returns: string
+      }
+      save_invoice_profit_details_multi: {
+        Args: { p_agents: Json; p_invoice_id: string; p_lines: Json }
         Returns: string
       }
       save_job_charge: {
@@ -1514,6 +1604,22 @@ export type Database = {
           p_status: string
           p_vendor_id: string
           p_vendor_invoice_number: string
+        }
+        Returns: string
+      }
+      update_invoice: {
+        Args: {
+          p_customer_address: string
+          p_customer_name: string
+          p_customer_trn: string
+          p_customer_vat_number: string
+          p_details: Json
+          p_due_date: string
+          p_invoice_date: string
+          p_invoice_id: string
+          p_lines: Json
+          p_payment_date: string
+          p_remarks: string
         }
         Returns: string
       }
