@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { containerSchema, type Invoice, type InvoiceProfitInput, type InvoiceProfitReport, type RecordPage, type UpdateInvoice } from "@transwave/contracts";
+import { invoiceProfitTotals, containerSchema, type Invoice, type InvoiceProfitInput, type InvoiceProfitReport, type RecordPage, type UpdateInvoice } from "@transwave/contracts";
 import type { Database, Json, TransWaveDatabaseClient } from "@transwave/database";
 import { requireData, throwDatabaseError } from "../common/database-error.js";
 import { decimal, money } from "../common/format.js";
@@ -64,7 +64,7 @@ export class InvoicesService {
     }
     const dateColumn = dateBasis === "payment" ? "payment_date" : "invoice_date";
     let invoicesQuery = database.from("invoices")
-      .select("id, job_id, hbl_snapshot, mbl_snapshot, invoice_number, draft_reference, invoice_date, payment_date, customer_name_snapshot")
+      .select("id, job_id, hbl_snapshot, mbl_snapshot, invoice_number, draft_reference, invoice_date, payment_date, customer_name_snapshot, containers_snapshot, planned_container_count_snapshot, total_aed")
       .eq("company_id", tenant.companyId).eq("status", "ISSUED").not(dateColumn, "is", null)
       .order(dateColumn, { ascending: false });
     if (fromDate) invoicesQuery = invoicesQuery.gte(dateColumn, fromDate);
@@ -74,12 +74,12 @@ export class InvoicesService {
     const invoices = invoiceResult.data ?? [];
     const invoiceIds = invoices.map((invoice) => invoice.id);
     const linesResult = invoiceIds.length
-      ? await database.from("invoice_lines").select("id, invoice_id, job_charge_id, service_name_snapshot, description_snapshot, quantity, uom_snapshot, unit_rate_snapshot, exchange_rate_snapshot, taxable_amount_aed").in("invoice_id", invoiceIds)
+      ? await database.from("invoice_lines").select("id, invoice_id, job_charge_id, service_name_snapshot, service_code_snapshot, description_snapshot, quantity, uom_snapshot, unit_rate_snapshot, exchange_rate_snapshot, taxable_amount_aed").in("invoice_id", invoiceIds)
       : { data: [], error: null };
     if (linesResult.error) throwDatabaseError(linesResult.error);
     const lineIds = (linesResult.data ?? []).map((line) => line.id);
     const detailsResult = lineIds.length
-      ? await database.from("invoice_line_profit_details").select("invoice_line_id, agent_name_snapshot, buying_cost_per_container_aed, selling_price_per_container_aed, commission_per_container_aed").in("invoice_line_id", lineIds)
+      ? await database.from("invoice_line_profit_details").select("invoice_line_id, agent_name_snapshot, buying_cost_per_container_aed, selling_price_per_container_aed, commission_per_container_aed, commission_quantity").in("invoice_line_id", lineIds)
       : { data: [], error: null };
     if (detailsResult.error) throwDatabaseError(detailsResult.error);
     const detailsByLine = new Map((detailsResult.data ?? []).map((detail) => [detail.invoice_line_id, detail]));
@@ -89,13 +89,6 @@ export class InvoicesService {
     if (agentCommissionResult.error) throwDatabaseError(agentCommissionResult.error);
     const agentCommissionsByLine = new Map<string, NonNullable<typeof agentCommissionResult.data>>();
     for (const entry of agentCommissionResult.data ?? []) agentCommissionsByLine.set(entry.invoice_line_id, [...(agentCommissionsByLine.get(entry.invoice_line_id) ?? []), entry]);
-    const chargeIds = [...new Set((linesResult.data ?? []).map((line) => line.job_charge_id))];
-    const chargesResult = chargeIds.length ? await database.from("job_charges").select("id, job_service_id").in("id", chargeIds) : { data: [], error: null };
-    if (chargesResult.error) throwDatabaseError(chargesResult.error);
-    const jobServiceIds = [...new Set((chargesResult.data ?? []).map((charge) => charge.job_service_id))];
-    const jobServicesResult = jobServiceIds.length ? await database.from("job_services").select("id, service_id").in("id", jobServiceIds) : { data: [], error: null };
-    if (jobServicesResult.error) throwDatabaseError(jobServicesResult.error);
-    const serviceByCharge = new Map((chargesResult.data ?? []).map((charge) => [charge.id, jobServicesResult.data?.find((service) => service.id === charge.job_service_id)?.service_id ?? null]));
     // Costs Reports must use explicit links only. Guessing by job/B/L can attach
     // one vendor bill to multiple customer invoices and inflate buying costs.
     const vendorBillsResult = invoiceIds.length ? await database.from("vendor_bills").select("id, customer_invoice_id, vendor_invoice_number").eq("company_id", tenant.companyId).in("customer_invoice_id", invoiceIds).order("bill_date", { ascending: true }).order("vendor_invoice_number", { ascending: true }) : { data: [], error: null };
@@ -106,22 +99,8 @@ export class InvoicesService {
       billsByInvoice.set(bill.customer_invoice_id, [...(billsByInvoice.get(bill.customer_invoice_id) ?? []), bill]);
     }
     const vendorBillIds = (vendorBillsResult.data ?? []).map((bill) => bill.id);
-    const vendorLinesResult = vendorBillIds.length ? await database.from("vendor_bill_lines").select("vendor_bill_id, line_number, description, service_id, quantity, uom, net_amount_aed").in("vendor_bill_id", vendorBillIds).order("vendor_bill_id", { ascending: true }).order("line_number", { ascending: true }) : { data: [], error: null };
+    const vendorLinesResult = vendorBillIds.length ? await database.from("vendor_bill_lines").select("vendor_bill_id, total_amount_aed").in("vendor_bill_id", vendorBillIds).order("vendor_bill_id", { ascending: true }).order("line_number", { ascending: true }) : { data: [], error: null };
     if (vendorLinesResult.error) throwDatabaseError(vendorLinesResult.error);
-    const billInvoiceById = new Map((vendorBillsResult.data ?? []).map((bill) => [bill.id, bill.customer_invoice_id!]));
-    const purchaseByInvoiceService = new Map<string, { amount: number; quantity: number; lots: { quantity: number; unitCost: number }[] }>();
-    for (const vendorLine of vendorLinesResult.data ?? []) {
-      const invoiceId = billInvoiceById.get(vendorLine.vendor_bill_id);
-      if (!invoiceId || !vendorLine.service_id || vendorLine.uom.trim().toUpperCase() !== "CNT" || vendorLine.net_amount_aed == null) continue;
-      const key = `${invoiceId}:${vendorLine.service_id}`;
-      const quantity = Number(vendorLine.quantity);
-      const amount = Number(vendorLine.net_amount_aed);
-      const current = purchaseByInvoiceService.get(key) ?? { amount: 0, quantity: 0, lots: [] };
-      current.amount += amount;
-      current.quantity += quantity;
-      current.lots.push({ quantity, unitCost: amount / quantity });
-      purchaseByInvoiceService.set(key, current);
-    }
     const agents = [...new Set([
       ...(detailsResult.data ?? []).map((detail) => detail.agent_name_snapshot?.trim()),
       ...(agentCommissionResult.data ?? []).map((detail) => detail.agent_name_snapshot.trim()),
@@ -129,140 +108,50 @@ export class InvoicesService {
     const rows = invoices.map((invoice) => {
       const lines = (linesResult.data ?? []).filter((line) => line.invoice_id === invoice.id);
       const containerLines = lines.filter((line) => line.uom_snapshot.trim().toUpperCase() === "CNT");
-      const containerDetails = containerLines.map((line) => detailsByLine.get(line.id));
-      const recorded = containerLines.length > 0 && containerDetails.every(Boolean);
-      const invoiceAgents = [...new Set(containerLines.flatMap((line) => {
-        const saved = agentCommissionsByLine.get(line.id) ?? [];
-        return saved.length ? saved.map((entry) => entry.agent_name_snapshot) : [detailsByLine.get(line.id)?.agent_name_snapshot].filter((name): name is string => Boolean(name));
-      }))].sort((left, right) => left.localeCompare(right));
-      const agentName = invoiceAgents.join(", ") || null;
-      const containerCount = containerLines.reduce((sum, line) => sum + Number(line.quantity), 0);
-      const vendorInvoiceNumbers = (billsByInvoice.get(invoice.id) ?? []).map((bill) => bill.vendor_invoice_number);
-      const linkedBillIds = new Set((billsByInvoice.get(invoice.id) ?? []).map((bill) => bill.id));
-      const linkedVendorLines = (vendorLinesResult.data ?? []).filter((line) => linkedBillIds.has(line.vendor_bill_id));
-      const invoiceTotalBuyingPerContainer = (billsByInvoice.get(invoice.id) ?? []).length === 1
-        && linkedVendorLines.length === 1
-        && linkedVendorLines[0]!.uom.trim().toUpperCase() === "INV"
-        && Number(linkedVendorLines[0]!.net_amount_aed) > 0
-        && containerCount > 0
-        ? Number(linkedVendorLines[0]!.net_amount_aed) / containerCount
-        : null;
-      let buyingCostTotal = 0;
-      let salesRevenue = 0;
+      const containerCount = (Array.isArray(invoice.containers_snapshot) ? invoice.containers_snapshot.length : 0) || invoice.planned_container_count_snapshot || containerLines.reduce((sum, line) => sum + Number(line.quantity), 0);
+      const allocatedLines = lines.filter((line) => detailsByLine.get(line.id)?.commission_quantity != null);
+      const commissionLines = allocatedLines.length ? allocatedLines : containerLines;
+      const recorded = commissionLines.length > 0 && commissionLines.every((line) => detailsByLine.has(line.id));
+      const legacyQuantity = containerLines.reduce((sum, line) => sum + Number(line.quantity), 0);
+      const agentAmounts = new Map<string, number>();
       let commission = 0;
-      let buyingCostRecorded = true;
-      let commissionRecorded = recorded;
-      const remainingPurchaseLots = new Map<string, { quantity: number; unitCost: number }[]>();
-      for (const [key, purchase] of purchaseByInvoiceService) {
-        if (key.startsWith(`${invoice.id}:`)) remainingPurchaseLots.set(key, purchase.lots.map((lot) => ({ ...lot })));
-      }
-      const reportLines = containerLines.map((line) => {
+      for (const line of commissionLines) {
         const detail = detailsByLine.get(line.id);
-        const quantity = Number(line.quantity);
-        const sellingPerContainer = detail?.selling_price_per_container_aed == null
-          ? Math.round(Number(line.unit_rate_snapshot) * Number(line.exchange_rate_snapshot) * 100) / 100
-          : Number(detail.selling_price_per_container_aed);
-        const lineSales = detail?.selling_price_per_container_aed == null
-          ? Number(line.taxable_amount_aed)
-          : Number(money(sellingPerContainer * quantity));
-        const serviceId = serviceByCharge.get(line.job_charge_id);
-        const allocatedPurchase = serviceId ? purchaseByInvoiceService.get(`${invoice.id}:${serviceId}`) : undefined;
-        const invoiceServiceQuantity = serviceId ? containerLines.filter((candidate) => serviceByCharge.get(candidate.job_charge_id) === serviceId).reduce((sum, candidate) => sum + Number(candidate.quantity), 0) : 0;
-        // Allocate only up to matching CNT quantities. Vendor lines marked INV,
-        // unmatched services, and excess quantities cannot be treated as cost.
-        const purchaseKey = serviceId ? `${invoice.id}:${serviceId}` : "";
-        let matchedQuantity = 0;
-        let lineBuyingAmount = 0;
-        const lots = remainingPurchaseLots.get(purchaseKey) ?? [];
-        while (lots.length && matchedQuantity < quantity) {
-          const lot = lots[0]!;
-          const amountToMatch = Math.min(quantity - matchedQuantity, lot.quantity);
-          matchedQuantity += amountToMatch;
-          lineBuyingAmount += amountToMatch * lot.unitCost;
-          lot.quantity -= amountToMatch;
-          if (lot.quantity <= 0.0000001) lots.shift();
-        }
-        remainingPurchaseLots.set(purchaseKey, lots);
-        const buyingPerContainer = detail?.buying_cost_per_container_aed != null
-          ? Number(detail.buying_cost_per_container_aed)
-          : matchedQuantity > 0
-          ? Math.round((lineBuyingAmount / matchedQuantity) * 100) / 100
-          : !allocatedPurchase ? invoiceTotalBuyingPerContainer : null;
-        const hasRecordedBuying = detail?.buying_cost_per_container_aed != null;
-        const actualBuyingQuantity = matchedQuantity > 0 ? matchedQuantity : invoiceTotalBuyingPerContainer !== null && !allocatedPurchase ? quantity : 0;
-        const lineBuying = buyingPerContainer === null ? null : money(hasRecordedBuying ? buyingPerContainer * quantity : matchedQuantity > 0 ? lineBuyingAmount : buyingPerContainer * actualBuyingQuantity);
-        const savedAgents = agentCommissionsByLine.get(line.id) ?? [];
-        const hasAgentCommissionRows = savedAgents.length > 0;
-        const lineCommissionPerContainer = hasAgentCommissionRows
-          ? savedAgents.reduce((sum, entry) => sum + Number(entry.commission_per_container_aed), 0)
-          : detail?.commission_per_container_aed ?? null;
-        const lineCommission = lineCommissionPerContainer === null ? null : money(Number(lineCommissionPerContainer) * quantity);
-        const lineAgentCommissions = hasAgentCommissionRows
-          ? savedAgents.map((entry) => ({ agentName: entry.agent_name_snapshot, commissionPerContainerAed: money(entry.commission_per_container_aed), totalCommissionAed: money(Number(entry.commission_per_container_aed) * quantity) }))
-          : detail?.agent_name_snapshot ? [{ agentName: detail.agent_name_snapshot, commissionPerContainerAed: money(detail.commission_per_container_aed), totalCommissionAed: money(Number(detail.commission_per_container_aed) * quantity) }] : [];
-        const lineGross = lineBuying === null || (!hasRecordedBuying && allocatedPurchase && matchedQuantity !== quantity) ? null : money(lineSales - Number(lineBuying));
-        const lineCompanyPure = lineGross === null || lineCommission === null ? null : money(Number(lineGross) - Number(lineCommission));
-        salesRevenue += lineSales;
-        if (lineBuying === null || (!hasRecordedBuying && allocatedPurchase && matchedQuantity !== quantity) || (!hasRecordedBuying && !allocatedPurchase && invoiceTotalBuyingPerContainer === null) || (!hasRecordedBuying && allocatedPurchase && allocatedPurchase.quantity > invoiceServiceQuantity)) buyingCostRecorded = false;
-        else buyingCostTotal += Number(lineBuying);
-        if (lineCommission === null) commissionRecorded = false;
-        else commission += Number(lineCommission);
-        return {
-          invoiceLineId: line.id,
-          serviceName: line.service_name_snapshot,
-          quantity,
-          buyingPricePerContainerAed: buyingPerContainer === null ? null : money(buyingPerContainer),
-          sellingPricePerContainerAed: money(sellingPerContainer),
-          commissionPerContainerAed: lineCommissionPerContainer === null ? null : money(lineCommissionPerContainer),
-          buyingCostAed: lineBuying,
-          salesRevenueAed: money(lineSales),
-          grossProfitAed: lineGross,
-          agentCommissionAed: lineCommission,
-          companyPureProfitAed: lineCompanyPure,
-          agentCommissions: lineAgentCommissions,
-        };
-      });
-      const grossProfit = buyingCostRecorded ? money(salesRevenue - buyingCostTotal) : null;
+        const quantity = detail?.commission_quantity ?? (legacyQuantity ? Number(line.quantity) / legacyQuantity * containerCount : 0);
+        if (!quantity) continue;
+        const saved = agentCommissionsByLine.get(line.id) ?? [];
+        const entries = saved.length ? saved : detail?.agent_name_snapshot ? [{ agent_name_snapshot: detail.agent_name_snapshot, commission_per_container_aed: detail.commission_per_container_aed }] : [];
+        commission += (entries.length ? entries.reduce((sum, entry) => sum + Number(entry.commission_per_container_aed), 0) : Number(detail?.commission_per_container_aed ?? 0)) * quantity;
+        for (const entry of entries) agentAmounts.set(entry.agent_name_snapshot, (agentAmounts.get(entry.agent_name_snapshot) ?? 0) + Number(entry.commission_per_container_aed) * quantity);
+      }
+      const linkedBills = billsByInvoice.get(invoice.id) ?? [];
+      const linkedIds = new Set(linkedBills.map((bill) => bill.id));
+      const vendorLines = (vendorLinesResult.data ?? []).filter((line) => linkedIds.has(line.vendor_bill_id));
+      const vendorTotal = linkedBills.length && linkedBills.every((bill) => vendorLines.some((line) => line.vendor_bill_id === bill.id)) && vendorLines.every((line) => line.total_amount_aed !== null)
+        ? vendorLines.reduce((sum, line) => sum + Number(line.total_amount_aed), 0) : null;
+      const financials = invoiceProfitTotals(Number(invoice.total_aed), vendorTotal, recorded ? Number(money(commission)) : null);
+      const invoiceAgents = [...agentAmounts.keys()].sort((left, right) => left.localeCompare(right));
       return {
         invoiceId: invoice.id,
         invoiceNumber: invoice.invoice_number ?? invoice.draft_reference,
-        vendorInvoiceNumbers,
+        vendorInvoiceNumbers: linkedBills.map((bill) => bill.vendor_invoice_number),
         invoiceDate: invoice.invoice_date!,
         customerName: invoice.customer_name_snapshot,
-        agentName,
+        agentName: invoiceAgents.join(", ") || null,
         agentNames: invoiceAgents,
-        agentCommissions: invoiceAgents.map((name) => ({
-          agentName: name,
-          commissionAed: money(containerLines.reduce((sum, line) => {
-            const entries = agentCommissionsByLine.get(line.id) ?? [];
-            const amount = entries.length
-              ? entries.find((entry) => entry.agent_name_snapshot.toLocaleLowerCase() === name.toLocaleLowerCase())?.commission_per_container_aed ?? 0
-              : detailsByLine.get(line.id)?.agent_name_snapshot?.toLocaleLowerCase() === name.toLocaleLowerCase() ? detailsByLine.get(line.id)!.commission_per_container_aed : 0;
-            return sum + Number(amount) * Number(line.quantity);
-          }, 0)),
-        })),
+        agentCommissions: invoiceAgents.map((name) => ({ agentName: name, commissionAed: money(agentAmounts.get(name)!) })),
         containerCount,
-        buyingCostAed: buyingCostRecorded && vendorInvoiceNumbers.length > 0 ? money(buyingCostTotal) : null,
-        salesRevenueAed: money(salesRevenue),
-        grossProfitAed: grossProfit,
-        commissionAed: commissionRecorded ? money(commission) : null,
-        companyPureProfitAed: commissionRecorded && grossProfit !== null ? money(Number(grossProfit) - commission) : null,
-        lines: reportLines,
+        buyingCostAed: vendorTotal === null ? null : money(vendorTotal),
+        salesRevenueAed: money(Number(invoice.total_aed)),
+        grossProfitAed: financials.totalProfit === null ? null : money(financials.totalProfit),
+        commissionAed: recorded ? money(commission) : null,
+        companyPureProfitAed: financials.pureProfit === null ? null : money(financials.pureProfit),
+        lines: [],
       };
     }).filter((row) => {
       if (agent === "__unrecorded__") return row.commissionAed === null;
       if (agent === "__none__") return row.commissionAed !== null && row.agentNames.length === 0;
       return !agent || row.agentNames.some((name) => name.toLocaleLowerCase() === agent.toLocaleLowerCase());
-    }).map((row) => {
-      if (!agent || agent.startsWith("__")) return row;
-      const selectedAgent = row.agentCommissions.find((entry) => entry.agentName.toLocaleLowerCase() === agent.toLocaleLowerCase());
-      return {
-        ...row,
-        agentName: agent,
-        agentNames: [agent],
-        agentCommissions: selectedAgent ? [selectedAgent] : [],
-        commissionAed: selectedAgent?.commissionAed ?? "0.00",
-      };
     });
     const sumOrNull = (values: (string | null)[]) => values.some((value) => value === null) ? null : money(values.reduce<number>((sum, value) => sum + Number(value), 0));
     const sumKnown = (values: (string | null)[]) => money(values.reduce<number>((sum, value) => sum + Number(value ?? 0), 0));
@@ -390,7 +279,7 @@ export class InvoicesService {
     }
     const lineIds = (lines ?? []).map((line) => line.id);
     const detailsResult = lineIds.length
-      ? await database.from("invoice_line_profit_details").select("invoice_line_id, agent_name_snapshot, buying_cost_per_container_aed, selling_price_per_container_aed, commission_per_container_aed").in("invoice_line_id", lineIds)
+      ? await database.from("invoice_line_profit_details").select("invoice_line_id, agent_name_snapshot, buying_cost_per_container_aed, selling_price_per_container_aed, commission_per_container_aed, commission_quantity").in("invoice_line_id", lineIds)
       : { data: [], error: null };
     if (detailsResult.error) throwDatabaseError(detailsResult.error);
     const detailsByLine = new Map((detailsResult.data ?? []).map((detail) => [detail.invoice_line_id, detail]));
@@ -415,7 +304,7 @@ export class InvoicesService {
     const orderedLines = [...invoice.lines].sort((left, right) => left.line_number - right.line_number);
     const lineIds = orderedLines.map((line) => line.id);
     const detailsResult = lineIds.length
-      ? await database.from("invoice_line_profit_details").select("invoice_line_id, agent_name_snapshot, buying_cost_per_container_aed, selling_price_per_container_aed, commission_per_container_aed").in("invoice_line_id", lineIds)
+      ? await database.from("invoice_line_profit_details").select("invoice_line_id, agent_name_snapshot, buying_cost_per_container_aed, selling_price_per_container_aed, commission_per_container_aed, commission_quantity").in("invoice_line_id", lineIds)
       : { data: [], error: null };
     if (detailsResult.error) throwDatabaseError(detailsResult.error);
     const agentCommissionResult = lineIds.length
@@ -424,7 +313,14 @@ export class InvoicesService {
     if (agentCommissionResult.error) throwDatabaseError(agentCommissionResult.error);
     const agentCommissionsByLine = new Map<string, typeof agentCommissionResult.data>();
     for (const entry of agentCommissionResult.data ?? []) agentCommissionsByLine.set(entry.invoice_line_id, [...(agentCommissionsByLine.get(entry.invoice_line_id) ?? []), entry]);
-    return this.toInvoice(invoice, orderedLines, new Map((detailsResult.data ?? []).map((detail) => [detail.invoice_line_id, detail])), agentCommissionsByLine);
+    const vendorResult = await database.from("vendor_bills")
+      .select("id, lines:vendor_bill_lines!vendor_bill_lines_vendor_bill_id_company_id_fkey(total_amount_aed)")
+      .eq("customer_invoice_id", id);
+    if (vendorResult.error) throwDatabaseError(vendorResult.error);
+    const bills = vendorResult.data ?? [];
+    const linkedVendorTotalAed = bills.length && bills.every((bill) => bill.lines.length > 0 && bill.lines.every((line) => line.total_amount_aed !== null))
+      ? money(bills.reduce((sum, bill) => sum + bill.lines.reduce((total, line) => total + Number(line.total_amount_aed), 0), 0)) : null;
+    return { ...this.toInvoice(invoice, orderedLines, new Map((detailsResult.data ?? []).map((detail) => [detail.invoice_line_id, detail])), agentCommissionsByLine), linkedVendorTotalAed };
   }
 
   async createDraft(database: TransWaveDatabaseClient, userId: string, jobId: string, chargeIds: string[]): Promise<Invoice> {
@@ -514,7 +410,7 @@ export class InvoicesService {
   private toInvoice(
     invoice: InvoiceRow,
     lines: InvoiceLineRow[],
-    detailsByLine = new Map<string, { agent_name_snapshot: string | null; buying_cost_per_container_aed: number | null; selling_price_per_container_aed: number | null; commission_per_container_aed: number }>(),
+    detailsByLine = new Map<string, { agent_name_snapshot: string | null; buying_cost_per_container_aed: number | null; selling_price_per_container_aed: number | null; commission_per_container_aed: number; commission_quantity?: number | null }>(),
     agentCommissionsByLine = new Map<string, { invoice_line_id: string; agent_name_snapshot: string; commission_per_container_aed: number }[]>(),
   ): Invoice {
     const containers = containerSchema.array().safeParse(invoice.containers_snapshot);
@@ -592,6 +488,7 @@ export class InvoicesService {
         totalAmount: money(line.total_amount_aed),
         profitDetails: detailsByLine.has(line.id) ? {
           agentName: detailsByLine.get(line.id)!.agent_name_snapshot,
+          commissionQuantity: detailsByLine.get(line.id)!.commission_quantity ?? null,
           buyingCostPerContainerAed: detailsByLine.get(line.id)!.buying_cost_per_container_aed === null ? null : money(detailsByLine.get(line.id)!.buying_cost_per_container_aed!),
           sellingPricePerContainerAed: detailsByLine.get(line.id)!.selling_price_per_container_aed === null ? null : money(detailsByLine.get(line.id)!.selling_price_per_container_aed!),
           commissionPerContainerAed: money((agentCommissionsByLine.get(line.id) ?? []).reduce((sum, entry) => sum + Number(entry.commission_per_container_aed), agentCommissionsByLine.get(line.id)?.length ? 0 : Number(detailsByLine.get(line.id)!.commission_per_container_aed))),

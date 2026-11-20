@@ -26,6 +26,7 @@ import type {
   Vendor,
   VendorBill,
 } from "@transwave/contracts";
+import { invoiceProfitTotals } from "@transwave/contracts";
 import { api } from "./api";
 import { useAuth } from "./auth";
 import { invoicePrintTitle, printInvoice } from "./print-invoice";
@@ -2450,6 +2451,15 @@ function Costs({ session, canViewReports, viewStateKey, bills, onLoadMore, invoi
     });
     return () => { active = false; };
   }, [session, summaryFromDate, summaryToDate, detailOnly, viewStateLoaded, canViewReports, profitReportRetry]);
+  useEffect(() => {
+    const invoiceId = selected?.customerInvoiceId;
+    if (!invoiceId) return;
+    let active = true;
+    void api.invoice(session, invoiceId).then((invoice) => {
+      if (active) setProfitInvoiceOverride(invoice);
+    }).catch(() => { if (active) setProfitReportError("Could not load the linked invoice totals."); });
+    return () => { active = false; };
+  }, [session, selected?.id, selected?.customerInvoiceId, selected?.totalAmountAed]);
   const linkedCustomerInvoice = selected
     ? (profitInvoiceOverride?.id === selected.customerInvoiceId ? profitInvoiceOverride : invoices.find((invoice) => invoice.id === selected.customerInvoiceId))
     : null;
@@ -2577,7 +2587,7 @@ function Costs({ session, canViewReports, viewStateKey, bills, onLoadMore, invoi
   return <div className={`cost-page${selected && !detailOnly ? " mobile-cost-detail" : !detailOnly ? " mobile-cost-list" : ""}`}>
     {!detailOnly && canViewReports && <section className="panel cost-profit-panel">
       <div className="panel-head cost-profit-heading">
-        <div><h2>Profit summary</h2><p>{profitPeriodLabel} · paid invoices counted by payment date · AED before VAT</p></div>
+        <div><h2>Profit summary</h2><p>{profitPeriodLabel} · paid invoices counted by payment date · invoice totals in AED</p></div>
         <div className="cost-profit-controls">
           <div className="dashboard-period-switch" role="group" aria-label="Cost reporting period">
             {(["month", "year", "all"] as const).map((period) => <button key={period} type="button" className={profitPeriod === period ? "active" : ""} aria-pressed={profitPeriod === period} onClick={() => updateViewState("profitPeriod", period)}>{period === "month" ? "Monthly" : period === "year" ? "Yearly" : "All time"}</button>)}
@@ -2591,9 +2601,9 @@ function Costs({ session, canViewReports, viewStateKey, bills, onLoadMore, invoi
       <div className="metrics cost-metrics cost-profit-summary-metrics">
         <Metric label="Pure profit" value={money.format(Number(profitReport?.totals.companyPureProfitAed ?? 0))} note="Total profit minus agent commission" good={Number(profitReport?.totals.companyPureProfitAed ?? 0) >= 0} />
         <Metric label="Agent commission" value={money.format(Number(profitReport?.totals.commissionAed ?? 0))} note="Commission per container × quantity" />
-        <Metric label="Total profit" value={money.format(Number(profitReport?.totals.grossProfitAed ?? 0))} note="Sales revenue minus buying cost" good={Number(profitReport?.totals.grossProfitAed ?? 0) >= 0} />
+        <Metric label="Total profit" value={money.format(Number(profitReport?.totals.grossProfitAed ?? 0))} note="Customer invoice total minus vendor invoice total" good={Number(profitReport?.totals.grossProfitAed ?? 0) >= 0} />
       </div>
-      {profitReport && (profitReport.totals.incompleteBuyingCostInvoiceCount > 0 || profitReport.totals.incompleteCommissionInvoiceCount > 0) && <p className="cost-profit-state" role="status">Some older invoices have unrecorded costs or commissions. Profit totals show known amounts only.</p>}
+      {profitReport && (profitReport.totals.incompleteBuyingCostInvoiceCount > 0 || profitReport.totals.incompleteCommissionInvoiceCount > 0) && <p className="cost-profit-state" role="status">Some invoices have missing vendor links or unrecorded commissions. Profit totals show known amounts only.</p>}
       {loadingProfitReport && <p className="cost-profit-state" role="status">Updating profit summary…</p>}
       {profitReportError && <div className="cost-profit-state" role="alert"><span>{profitReportError}</span><button className="link-button" type="button" onClick={() => setProfitReportRetry((retry) => retry + 1)}>Retry</button></div>}
     </section>}
@@ -2650,7 +2660,7 @@ function Costs({ session, canViewReports, viewStateKey, bills, onLoadMore, invoi
         <table className="charge-table"><thead><tr><th>Vendor service</th><th>Qty</th><th>Rate / FX</th><th>Cost AED</th><th>VAT</th></tr></thead><tbody>{selected.lines.map((line) => <tr key={line.id}>
           <td>{line.serviceName || line.description}<small>{line.description}</small></td><td>{line.quantity} {line.uom}{line.uom.trim().toUpperCase() === "INV" && linkedCustomerInvoice ? <small>Allocated across {linkedCustomerInvoice.lines.filter((invoiceLine) => invoiceLine.uom.trim().toUpperCase() === "CNT").reduce((sum, invoiceLine) => sum + Number(invoiceLine.quantity), 0)} customer containers</small> : null}</td><td>{formatChargeRate(line.currency, line.unitRate)}<small>{line.currency === "USD" ? `1 USD = ${line.exchangeRate} AED` : "1 AED = 1 AED"}</small></td><td>{money.format(Number(line.netAmountAed))}</td><td>{money.format(Number(line.vatAmountAed))}</td>
         </tr>)}</tbody></table>
-        {(canEdit || canViewReports) && <CostCommissionEditor key={linkedCustomerInvoice?.id ?? selected.customerInvoiceId ?? "unlinked"} invoice={linkedCustomerInvoice} vendorInvoiceNumber={selected.vendorInvoiceNumber} canEdit={canEdit} save={async (invoice, agents, inputs) => {
+        {(canEdit || canViewReports) && <CostCommissionEditor key={`${linkedCustomerInvoice?.id ?? selected.customerInvoiceId ?? "unlinked"}:${linkedCustomerInvoice?.linkedVendorTotalAed === undefined ? "loading" : "loaded"}`} invoice={linkedCustomerInvoice?.linkedVendorTotalAed === undefined ? undefined : linkedCustomerInvoice} vendorInvoiceNumber={selected.vendorInvoiceNumber} canEdit={canEdit} save={async (invoice, agents, inputs) => {
           const updated = await api.saveInvoiceProfitDetails(session, invoice.id, {
             agents: agents.map((agent) => ({
               agentName: agent.agentName,
@@ -2659,8 +2669,12 @@ function Costs({ session, canViewReports, viewStateKey, bills, onLoadMore, invoi
             agentName: agents[0]?.agentName ?? null,
             lines: invoice.lines.map((line) => ({
               invoiceLineId: line.id,
-              buyingCostPerContainerAed: line.uom.trim().toUpperCase() === "CNT" ? amountToAed(inputs.buyingUsd, "3.685").toFixed(2) : null,
-              sellingPricePerContainerAed: line.uom.trim().toUpperCase() === "CNT" ? amountToAed(inputs.sellingUsd, "3.685").toFixed(2) : null,
+              buyingCostPerContainerAed: line.id === inputs.referenceLineId
+                ? inputs.buyingUsd.trim() ? amountToAed(inputs.buyingUsd, "3.685").toFixed(2) : null
+                : line.profitDetails?.buyingCostPerContainerAed ?? null,
+              sellingPricePerContainerAed: line.id === inputs.referenceLineId
+                ? inputs.sellingUsd.trim() ? amountToAed(inputs.sellingUsd, "3.685").toFixed(2) : null
+                : line.profitDetails?.sellingPricePerContainerAed ?? null,
               commissionPerContainerAed: "0.00",
             })),
           });
@@ -2678,15 +2692,11 @@ function CostCommissionEditor({ invoice, vendorInvoiceNumber, canEdit, save }: {
   invoice: Invoice | null | undefined;
   vendorInvoiceNumber: string;
   canEdit: boolean;
-  save(invoice: Invoice, agents: { agentName: string; commissionUsd: string }[], inputs: { buyingUsd: string; sellingUsd: string }): Promise<void>;
+  save(invoice: Invoice, agents: { agentName: string; commissionUsd: string }[], inputs: { buyingUsd: string; sellingUsd: string; referenceLineId: string | null }): Promise<void>;
 }) {
   const containerLines = invoice?.lines.filter((line) => line.uom.trim().toUpperCase() === "CNT") ?? [];
-  const sellingSourceLine = invoice?.lines.find((line) => /ocean\s*freight/i.test(`${line.serviceCode} ${line.serviceName} ${line.description}`));
-  const sellingSourceUsd = sellingSourceLine
-    ? (Number(sellingSourceLine.unitRate) * (sellingSourceLine.currency === "USD" ? 1 : 1 / Number(sellingSourceLine.exchangeRate))).toFixed(2)
-    : null;
   const [initialAgentEntries] = useState(() => {
-    const recordedLine = containerLines.find((line) => line.profitDetails);
+    const recordedLine = invoice?.lines.find((line) => line.profitDetails?.agentCommissions?.length) ?? containerLines.find((line) => line.profitDetails);
     return recordedLine?.profitDetails?.agentCommissions?.length
       ? recordedLine.profitDetails.agentCommissions.map((agent, index) => ({
         id: `agent-${index + 1}`,
@@ -2695,35 +2705,68 @@ function CostCommissionEditor({ invoice, vendorInvoiceNumber, canEdit, save }: {
       }))
       : recordedLine?.profitDetails?.agentName
         ? [{ id: "agent-1", agentName: recordedLine.profitDetails.agentName, commissionUsd: (Number(recordedLine.profitDetails.commissionPerContainerAed) / 3.685).toFixed(2) }]
-        : [{ id: "agent-1", agentName: "", commissionUsd: "0.00" }];
+        : [{ id: "agent-1", agentName: "", commissionUsd: "" }];
   });
   const [agentIds, setAgentIds] = useState(() => initialAgentEntries.map((agent) => agent.id));
   const [agentNames, setAgentNames] = useState<Record<string, string>>(() => Object.fromEntries(initialAgentEntries.map((agent) => [agent.id, agent.agentName])));
   const [commissionRates, setCommissionRates] = useState<Record<string, string>>(() => Object.fromEntries(initialAgentEntries.map((agent) => [agent.id, agent.commissionUsd])));
   const nextAgentId = useRef(initialAgentEntries.length + 1);
-  const [buyingUsd, setBuyingUsd] = useState(() => {
-    const recordedLine = containerLines.find((line) => line.profitDetails);
-    return profitAedAsUsd(recordedLine?.profitDetails?.buyingCostPerContainerAed);
-  });
-  const [sellingUsd, setSellingUsd] = useState(sellingSourceUsd ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const invoiceContainerCount = invoice
     ? invoice.containers.length || invoice.plannedContainerCount || containerLines.reduce((sum, line) => sum + Number(line.quantity), 0)
     : 0;
+  const recordedBuyingAed = invoice?.lines.find((line) => line.profitDetails?.buyingCostPerContainerAed !== null && line.profitDetails?.buyingCostPerContainerAed !== undefined)?.profitDetails?.buyingCostPerContainerAed;
+  const matchingQuantityLines = invoice?.lines.filter((line) => Number(line.quantity) === invoiceContainerCount) ?? [];
+  const sellingReferenceLine = matchingQuantityLines.find((line) => /ocean\s*freight/i.test(`${line.serviceCode} ${line.serviceName} ${line.description}`))
+    ?? matchingQuantityLines[0]
+    ?? invoice?.lines.find((line) => /ocean\s*freight/i.test(`${line.serviceCode} ${line.serviceName} ${line.description}`));
+  const recordedSellingAed = sellingReferenceLine?.profitDetails?.sellingPricePerContainerAed;
+  const invoiceSellingUsd = sellingReferenceLine && Number(sellingReferenceLine.quantity) > 0
+    ? Number(sellingReferenceLine.netAmount) / Number(sellingReferenceLine.quantity) / 3.685
+    : null;
+  const initialBuyingUsd = recordedBuyingAed == null ? "" : (Number(recordedBuyingAed) / 3.685).toFixed(2);
+  const initialSellingUsd = recordedSellingAed == null ? invoiceSellingUsd?.toFixed(2) ?? "" : (Number(recordedSellingAed) / 3.685).toFixed(2);
+  const [buyingUsd, setBuyingUsd] = useState(initialBuyingUsd);
+  const [sellingUsd, setSellingUsd] = useState(initialSellingUsd);
+  const normalizeSnapshotAmount = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric) ? numeric.toFixed(2) : trimmed;
+  };
+  const buildSnapshot = (buying: string, selling: string, agents: { agentName: string; commissionUsd: string }[]) => JSON.stringify({
+    buyingUsd: normalizeSnapshotAmount(buying),
+    sellingUsd: normalizeSnapshotAmount(selling),
+    agents: agents.map((agent) => ({
+      agentName: agent.agentName.trim(),
+      commissionUsd: normalizeSnapshotAmount(agent.commissionUsd),
+    })),
+  });
+  const [savedSnapshot, setSavedSnapshot] = useState(() => buildSnapshot(initialBuyingUsd, initialSellingUsd, initialAgentEntries));
+  const [saveSuccess, setSaveSuccess] = useState("");
+  const currentSnapshot = buildSnapshot(buyingUsd, sellingUsd, agentIds.map((id) => ({
+    agentName: agentNames[id] ?? "",
+    commissionUsd: commissionRates[id] ?? "",
+  })));
+  const hasChanges = currentSnapshot !== savedSnapshot;
+  useEffect(() => {
+    if (hasChanges) setSaveSuccess("");
+  }, [hasChanges]);
   if (!canEdit) return <section className="panel cost-commission-editor"><h3>Agent commission</h3><p>Commission is managed in Costs. You do not have permission to edit it.</p></section>;
-  if (!invoice) return <section className="panel cost-commission-editor"><h3>Profit tracking</h3><p>Link a customer invoice to <b>{vendorInvoiceNumber}</b> before recording agent commission or comparing container lines.</p></section>;
+  if (!invoice) return <section className="panel cost-commission-editor"><h3>Profit tracking</h3><p>{invoice === undefined ? "Loading linked invoice totals…" : `Link a customer invoice to ${vendorInvoiceNumber} to calculate profit.`}</p></section>;
   const recorded = invoice.profitRecorded;
   const totalContainers = invoiceContainerCount;
   const validAmount = (value: string) => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0;
-  const complete = Boolean(totalContainers && validAmount(buyingUsd) && validAmount(sellingUsd) && agentIds.every((id) => validAmount(commissionRates[id] ?? "")));
+  const referenceAmountsValid = [buyingUsd, sellingUsd].every((value) => value.trim() === "" || validAmount(value));
+  const complete = Boolean(totalContainers && referenceAmountsValid && agentIds.every((id) => (commissionRates[id] ?? "").trim() === "" || validAmount(commissionRates[id] ?? "")));
   const agentRequired = agentIds.some((id) => Number(commissionRates[id] ?? "0") > 0 && !(agentNames[id] ?? "").trim());
   const toAedTotal = (usd: string) => roundMoney(amountToAed(usd || "0", "3.685") * totalContainers);
-  const totalProfitAed = complete ? toAedTotal(sellingUsd) - toAedTotal(buyingUsd) : null;
   const commissionAed = complete ? roundMoney(agentIds.reduce((sum, id) => sum + toAedTotal(commissionRates[id] ?? "0"), 0)) : null;
-  const pureProfitAed = totalProfitAed === null || commissionAed === null ? null : roundMoney(totalProfitAed - commissionAed);
+  const vendorTotalAed = invoice.linkedVendorTotalAed == null ? null : Number(invoice.linkedVendorTotalAed);
+  const { totalProfit: totalProfitAed, pureProfit: pureProfitAed } = invoiceProfitTotals(Number(invoice.total), vendorTotalAed, commissionAed);
   const submit = async () => {
-    if (saving || !containerLines.length || !complete) return;
+    if (saving || !invoice.lines.length || !complete || !hasChanges) return;
     const currentAgents = agentIds.map((id) => ({ id, agentName: (agentNames[id] ?? "").trim(), commissionUsd: commissionRates[id] ?? "0.00" }));
     const missingAgent = currentAgents.find((agent) => Number(agent.commissionUsd) > 0 && !agent.agentName);
     if (missingAgent) {
@@ -2732,35 +2775,44 @@ function CostCommissionEditor({ invoice, vendorInvoiceNumber, canEdit, save }: {
     }
     setSaving(true);
     setError("");
-    try { await save(invoice, currentAgents.filter((agent) => agent.agentName).map((agent) => ({ agentName: agent.agentName, commissionUsd: agent.commissionUsd })), { buyingUsd, sellingUsd }); }
+    setSaveSuccess("");
+    try {
+      await save(invoice, currentAgents.filter((agent) => agent.agentName).map((agent) => ({ agentName: agent.agentName, commissionUsd: agent.commissionUsd })), { buyingUsd, sellingUsd, referenceLineId: sellingReferenceLine?.id ?? null });
+      setSavedSnapshot(currentSnapshot);
+      setSaveSuccess("Profit details saved successfully.");
+    }
     catch (reason) { setError(message(reason)); }
     finally { setSaving(false); }
   };
   return <section className="panel cost-commission-editor">
-    <div className="panel-head"><div><h3>Invoice profit</h3><p>Enter the per-container amounts in USD for {totalContainers || "the linked invoice"} containers.</p></div><Tag text={recorded && complete ? "RECORDED" : "NOT RECORDED"} /></div>
-    {!containerLines.length ? <p className="empty-inline">The linked customer invoice has no container lines.</p> : <>
-      <section className="invoice-profit-source" aria-label="Linked customer invoice details">
-        <div className="invoice-profit-source-heading"><div><h4>Customer invoice source</h4><p>{invoice.invoiceNumber || invoice.draftReference} · {invoice.customerName}</p></div><strong>{totalContainers} containers</strong></div>
-        <div className="invoice-profit-source-table-wrap"><table className="invoice-profit-source-table"><thead><tr><th>Invoice line</th><th>Qty</th><th>Selling rate</th><th>Line total (AED)</th></tr></thead><tbody>{invoice.lines.map((line) => <tr key={line.id}><td>{line.serviceName || line.description}</td><td>{line.quantity} {line.uom}</td><td>{formatChargeRate(line.currency, line.unitRate)}{line.currency === "USD" ? ` · FX ${line.exchangeRate}` : ""}</td><td>{money.format(Number(line.netAmount))}</td></tr>)}</tbody></table></div>
-        <p className="form-help">Container count uses the invoice’s recorded container list, then its planned count. Invoice line quantities and selling totals are shown above for verification.</p>
+    <div className="panel-head"><div><h3>Invoice profit</h3><p>Customer invoice total minus vendor invoice total minus agent commission.</p></div><Tag text={recorded && complete ? "RECORDED" : "NOT RECORDED"} /></div>
+    {!invoice.lines.length ? <p className="empty-inline">The linked customer invoice has no service lines.</p> : <>
+      <div className="detail-grid cost-profit-totals-grid">
+        <Detail label="Customer invoice total" value={money.format(Number(invoice.total))} />
+        <Detail label="Linked vendor invoice total" value={vendorTotalAed === null ? "Not linked" : money.format(vendorTotalAed)} />
+        <Detail label="Containers for agent commission" value={String(totalContainers)} />
+      </div>
+      <section className="invoice-profit-source" aria-label="Customer invoice breakdown">
+        <div className="invoice-profit-source-heading"><div><h4>Customer invoice breakdown</h4><p>{invoice.invoiceNumber || invoice.draftReference} · reference only</p></div><strong>{money.format(Number(invoice.total))}</strong></div>
+        <div className="invoice-profit-source-table-wrap"><table className="invoice-profit-source-table"><thead><tr><th>Service</th><th>Qty</th><th>Rate / FX</th><th>Total AED</th></tr></thead><tbody>{invoice.lines.map((line) => <tr key={line.id}><td>{line.serviceName || line.description}</td><td>{line.quantity} {line.uom}</td><td>{formatChargeRate(line.currency, line.unitRate)}{line.currency === "USD" ? ` · FX ${line.exchangeRate}` : ""}</td><td>{money.format(Number(line.totalAmount))}</td></tr>)}</tbody></table></div>
       </section>
+      <div className="two cost-profit-reference-values">
+        <Field label="Buying per container (USD)"><input type="number" min="0" step="0.01" value={buyingUsd} disabled={saving} onChange={(event) => setBuyingUsd(event.target.value)} placeholder="0.00" /></Field>
+        <Field label="Selling per container (USD)"><input type="number" min="0" step="0.01" value={sellingUsd} disabled={saving} onChange={(event) => setSellingUsd(event.target.value)} placeholder="0.00" /></Field>
+      </div>
       <div className="agent-commission-entries">
         {agentIds.map((id, index) => {
           const name = agentNames[id] ?? "";
-          const commissionUsd = commissionRates[id] ?? "0.00";
+          const commissionUsd = commissionRates[id] ?? "";
           return <div className="agent-commission-entry" key={id}>
             <Field label={Number(commissionUsd) > 0 ? `Agent ${index + 1} (required for commission)` : `Agent ${index + 1} (optional)`}><input value={name} disabled={saving} aria-invalid={Number(commissionUsd) > 0 && !name.trim() || undefined} onChange={(event) => { const value = event.target.value; setAgentNames((current) => ({ ...current, [id]: value })); if (value.trim()) setError(""); }} placeholder="Enter agent name" autoComplete="off" /></Field>
             <Field label="Commission per container (USD)"><input required type="number" min="0" step="0.01" value={commissionUsd} disabled={saving} onChange={(event) => setCommissionRates((current) => ({ ...current, [id]: event.target.value }))} placeholder="0.00" /></Field>
-            {agentIds.length > 1 && <button className="link-button remove-agent-entry" type="button" disabled={saving} onClick={() => setAgentIds((current) => current.filter((item) => item !== id))}>Remove agent</button>}
+            <button className="link-button remove-agent-entry" type="button" disabled={saving} onClick={() => setAgentIds((current) => current.filter((item) => item !== id))}>Remove agent</button>
           </div>;
         })}
-        <button className="soft" type="button" disabled={saving} onClick={() => { const id = `agent-${nextAgentId.current++}`; setAgentNames((current) => ({ ...current, [id]: "" })); setCommissionRates((current) => ({ ...current, [id]: "0.00" })); setAgentIds((current) => [...current, id]); }}>+ Add agent</button>
+        <button className="soft" type="button" disabled={saving} onClick={() => { const id = `agent-${nextAgentId.current++}`; setAgentNames((current) => ({ ...current, [id]: "" })); setCommissionRates((current) => ({ ...current, [id]: "" })); setAgentIds((current) => [...current, id]); }}>+ Add agent</button>
       </div>
-      <div className="three cost-profit-inputs">
-        <Field label="Buying per container (USD)"><input required type="number" min="0" step="0.01" value={buyingUsd} disabled={saving} onChange={(event) => setBuyingUsd(event.target.value)} placeholder="0.00" /></Field>
-        <div className="cost-profit-selling-field"><Field label="Selling per container (USD)"><input required type="number" min="0" step="0.01" value={sellingUsd} readOnly disabled={saving || sellingSourceUsd === null} placeholder="Ocean Freight rate required" /></Field><small>{sellingSourceUsd !== null ? `Always taken from Ocean Freight · USD ${sellingSourceUsd}` : "Add an Ocean Freight line to the customer invoice to set selling price."}</small></div>
-      </div>
-      <p className="form-help">USD amounts are converted at 1 USD = 3.685 AED and multiplied by {totalContainers} containers.</p>
+      <p className="form-help">Buying and selling per container are saved for reference only and do not change the invoice-total profit calculation. Only agent commission is multiplied by {totalContainers} containers. USD values are converted at 1 USD = 3.685 AED.</p>
       {agentRequired && <p className="form-help" role="status">Enter a name for each agent with a non-zero commission.</p>}
       <div className="metrics cost-metrics cost-profit-summary-metrics">
         <Metric label="Pure profit" value={pureProfitAed === null ? "Enter amounts" : money.format(pureProfitAed)} note="After agent commission" good={pureProfitAed !== null && pureProfitAed >= 0} />
@@ -2779,7 +2831,8 @@ function CostCommissionEditor({ invoice, vendorInvoiceNumber, canEdit, save }: {
       </div>}
     </>}
     {error && <div className="error-banner" role="alert">{error}</div>}
-    {containerLines.length > 0 && <div className="form-actions"><button className="button" type="button" disabled={saving || !complete} onClick={() => void submit()}>{saving ? <><span className="button-spinner" aria-hidden="true" /> Saving…</> : "Save profit details"}</button></div>}
+    {saveSuccess && <div className="profit-save-success" role="status" aria-live="polite">{saveSuccess}</div>}
+    {invoice.lines.length > 0 && <div className="form-actions"><button className="button" type="button" disabled={saving || !complete || !hasChanges} onClick={() => void submit()}>{saving ? <><span className="button-spinner" aria-hidden="true" /> Saving…</> : "Save profit details"}</button></div>}
   </section>;
 }
 
@@ -3036,7 +3089,7 @@ function CostsReports({ session, viewStateKey }: { session: Session; viewStateKe
   const downloadCsv = () => {
     if (!report) return;
     const rows = [
-      ["Customer invoice / line", "Vendor invoice reference", "Invoice date", "Customer", "Agents", "Container count", "Buying cost AED", "Sales revenue AED", "Gross profit AED", "Agent commission AED", "Company pure profit AED", "Buying price / CNT AED", "Selling price / CNT AED", "Commission / CNT AED", "Agent commission breakdown"],
+      ["Customer invoice / line", "Vendor invoice reference", "Invoice date", "Customer", "Agents", "Container count", "Vendor invoice total AED", "Customer invoice total AED", "Total profit AED", "Agent commission AED", "Company pure profit AED", "Buying price / unit AED", "Selling price / unit AED", "Commission / CNT AED", "Agent commission breakdown"],
       ...report.items.flatMap((item) => [
         [item.invoiceNumber, item.vendorInvoiceNumbers.join("; ") || "Not linked", item.invoiceDate, item.customerName, item.agentNames.join("; ") || (item.commissionAed === null ? "Not recorded" : "No agent"), String(item.containerCount), item.buyingCostAed ?? "Not recorded", item.salesRevenueAed, item.grossProfitAed ?? "Not recorded", item.commissionAed ?? "Not recorded", item.companyPureProfitAed ?? "Not recorded", "", "", "", item.agentCommissions.map((entry) => `${entry.agentName}: AED ${entry.commissionAed}`).join("; ")],
         ...item.lines.map((line) => [`${item.invoiceNumber} · ${line.serviceName}`, item.vendorInvoiceNumbers.join("; ") || "Not linked", item.invoiceDate, item.customerName, line.agentCommissions.map((entry) => entry.agentName).join("; ") || (line.agentCommissionAed === null ? "Not recorded" : "No agent"), String(line.quantity), line.buyingCostAed ?? "Not recorded", line.salesRevenueAed, line.grossProfitAed ?? "Not recorded", line.agentCommissionAed ?? "Not recorded", line.companyPureProfitAed ?? "Not recorded", line.buyingPricePerContainerAed ?? "Not recorded", line.sellingPricePerContainerAed, line.commissionPerContainerAed ?? "Not recorded", line.agentCommissions.map((entry) => `${entry.agentName}: AED ${entry.commissionPerContainerAed}/CNT · AED ${entry.totalCommissionAed}`).join("; ")]),
@@ -3058,7 +3111,7 @@ function CostsReports({ session, viewStateKey }: { session: Session; viewStateKe
   const grossProfitIncomplete = Boolean(report?.totals.incompleteBuyingCostInvoiceCount);
   const totalsIncomplete = Boolean(grossProfitIncomplete || report?.totals.incompleteCommissionInvoiceCount);
   return <div className="agent-profit-report costs-report-view">
-    <Panel title="Costs Reports" sub="Linked vendor and customer invoice lines · amounts in AED before VAT">
+    <Panel title="Costs Reports" sub="Customer invoice total minus linked vendor invoice totals and agent commission · AED">
       <div className="agent-profit-filters">
         <Field label="Customer invoice date from"><input type="date" value={fromDate} onChange={(event) => setFilters((state) => ({ ...state, fromDate: event.target.value }))} /></Field>
         <Field label="Customer invoice date to"><input type="date" value={toDate} onChange={(event) => setFilters((state) => ({ ...state, toDate: event.target.value }))} /></Field>
@@ -3068,15 +3121,15 @@ function CostsReports({ session, viewStateKey }: { session: Session; viewStateKe
       {error && <div className="error-banner" role="alert">{error}</div>}
       {loading && <p className="muted" role="status">Updating report…</p>}
       {report && <>
-        {totalsIncomplete && <p className="form-help" role="status">Profit totals are incomplete: {report.totals.incompleteBuyingCostInvoiceCount} invoice(s) are missing buying cost data and {report.totals.incompleteCommissionInvoiceCount} are missing commission records. Missing values are shown as “Not recorded”; totals below include known amounts only.</p>}
+        {totalsIncomplete && <p className="form-help" role="status">Profit totals are incomplete: {report.totals.incompleteBuyingCostInvoiceCount} invoice(s) are missing vendor invoice totals and {report.totals.incompleteCommissionInvoiceCount} are missing commission records. Missing values are shown as “Not recorded”; totals below include known amounts only.</p>}
         <div className="metric-grid agent-profit-metrics costs-report-summary-metrics">
           <Metric label="Pure profit" value={money.format(Number(report.totals.companyPureProfitAed))} note="Total profit minus agent commission" good={Number(report.totals.companyPureProfitAed) >= 0} />
           <Metric label="Agent commission" value={money.format(Number(report.totals.commissionAed))} note="Per container × quantity" />
-          <Metric label="Total profit" value={money.format(Number(report.totals.grossProfitAed))} note="Sales revenue minus buying cost" />
+          <Metric label="Total profit" value={money.format(Number(report.totals.grossProfitAed))} note="Customer invoice total minus vendor invoice total" />
         </div>
-        <div className="activity-table-scroll agent-profit-table-scroll"><table className="activity-table agent-profit-table costs-report-table"><thead><tr><th>Customer invoice</th><th>Vendor invoice</th><th>Date</th><th>Customer</th><th>Agents</th><th>Containers</th><th>Buying cost</th><th>Selling revenue</th><th>Gross margin</th><th>Agent commission</th><th>Company pure profit</th></tr></thead><tbody>
+        <div className="activity-table-scroll agent-profit-table-scroll"><table className="activity-table agent-profit-table costs-report-table"><thead><tr><th>Customer invoice</th><th>Vendor invoice</th><th>Date</th><th>Customer</th><th>Agents</th><th>Containers</th><th>Vendor invoice total</th><th>Customer invoice total</th><th>Total profit</th><th>Agent commission</th><th>Company pure profit</th></tr></thead><tbody>
           {report.items.map((item) => <Fragment key={item.invoiceId}>
-            <tr className="cost-report-invoice-row"><td><b>{item.invoiceNumber}</b>{item.lines.length > 0 && <details className="cost-report-line-details"><summary>Container line breakdown</summary><div className="cost-report-line-scroll"><table><thead><tr><th>Line</th><th>Qty</th><th>Buying / CNT</th><th>Selling / CNT</th><th>Gross margin</th><th>Agent commission / CNT</th><th>Total commission</th><th>Pure profit</th></tr></thead><tbody>{item.lines.map((line) => <tr key={line.invoiceLineId}><td>{line.serviceName}{line.agentCommissions.length > 0 && <small className="agent-line-commissions">{line.agentCommissions.map((entry) => `${entry.agentName}: ${formatMoney(entry.commissionPerContainerAed)} / CNT`).join(" · ")}</small>}</td><td>{line.quantity}</td><td>{formatMoney(line.buyingPricePerContainerAed)}</td><td>{formatMoney(line.sellingPricePerContainerAed)}</td><td>{formatMoney(line.grossProfitAed)}</td><td>{formatMoney(line.commissionPerContainerAed)}</td><td>{formatMoney(line.agentCommissionAed)}</td><td>{formatMoney(line.companyPureProfitAed)}</td></tr>)}</tbody></table></div></details>}</td><td>{item.vendorInvoiceNumbers.join(", ") || "Not linked"}</td><td>{item.invoiceDate}</td><td>{item.customerName}</td><td>{item.agentNames.join(", ") || (item.commissionAed === null ? "Not recorded" : "No agent")}</td><td>{item.containerCount}</td><td>{formatMoney(item.buyingCostAed)}</td><td>{formatMoney(item.salesRevenueAed)}</td><td>{formatMoney(item.grossProfitAed)}</td><td>{formatMoney(item.commissionAed)}</td><td>{formatMoney(item.companyPureProfitAed)}</td></tr>
+            <tr className="cost-report-invoice-row"><td><b>{item.invoiceNumber}</b>{item.lines.length > 0 && <details className="cost-report-line-details"><summary>Service breakdown</summary><div className="cost-report-line-scroll"><table><thead><tr><th>Line</th><th>Qty</th><th>Buying / unit</th><th>Selling / unit</th><th>Gross margin</th><th>Agent commission / CNT</th><th>Total commission</th><th>Pure profit</th></tr></thead><tbody>{item.lines.map((line) => <tr key={line.invoiceLineId}><td>{line.serviceName}{line.agentCommissions.length > 0 && <small className="agent-line-commissions">{line.agentCommissions.map((entry) => `${entry.agentName}: ${formatMoney(entry.commissionPerContainerAed)} / CNT`).join(" · ")}</small>}</td><td>{line.quantity}</td><td>{formatMoney(line.buyingPricePerContainerAed)}</td><td>{formatMoney(line.sellingPricePerContainerAed)}</td><td>{formatMoney(line.grossProfitAed)}</td><td>{formatMoney(line.commissionPerContainerAed)}</td><td>{formatMoney(line.agentCommissionAed)}</td><td>{formatMoney(line.companyPureProfitAed)}</td></tr>)}</tbody></table></div></details>}</td><td>{item.vendorInvoiceNumbers.join(", ") || "Not linked"}</td><td>{item.invoiceDate}</td><td>{item.customerName}</td><td>{item.agentNames.join(", ") || (item.commissionAed === null ? "Not recorded" : "No agent")}</td><td>{item.containerCount}</td><td>{formatMoney(item.buyingCostAed)}</td><td>{formatMoney(item.salesRevenueAed)}</td><td>{formatMoney(item.grossProfitAed)}</td><td>{formatMoney(item.commissionAed)}</td><td>{formatMoney(item.companyPureProfitAed)}</td></tr>
           </Fragment>)}
           {!report.items.length && <tr><td colSpan={11}>No invoices match these filters.</td></tr>}
         </tbody><tfoot><tr><th colSpan={5}>Filtered totals{totalsIncomplete ? " · INCOMPLETE (known amounts only)" : ""}</th><th>{report.totals.containerCount}</th><th>{money.format(Number(report.totals.buyingCostAed))}</th><th>{money.format(Number(report.totals.salesRevenueAed))}</th><th>{money.format(Number(report.totals.grossProfitAed))}</th><th>{money.format(Number(report.totals.commissionAed))}</th><th>{money.format(Number(report.totals.companyPureProfitAed))}</th></tr></tfoot></table></div>

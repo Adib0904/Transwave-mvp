@@ -405,6 +405,7 @@ export type Database = {
         Row: {
           agent_name_snapshot: string | null
           buying_cost_per_container_aed: number | null
+          commission_quantity: number | null
           commission_per_container_aed: number
           company_id: string
           invoice_id: string
@@ -415,6 +416,7 @@ export type Database = {
         Insert: {
           agent_name_snapshot?: string | null
           buying_cost_per_container_aed?: number | null
+          commission_quantity?: number | null
           commission_per_container_aed?: number
           company_id: string
           invoice_id: string
@@ -425,6 +427,7 @@ export type Database = {
         Update: {
           agent_name_snapshot?: string | null
           buying_cost_per_container_aed?: number | null
+          commission_quantity?: number | null
           commission_per_container_aed?: number
           company_id?: string
           invoice_id?: string
