@@ -502,6 +502,7 @@ export const invoiceLineSchema = z.object({
     buyingCostPerContainerAed: moneySchema.nullable(),
     sellingPricePerContainerAed: moneySchema.nullable(),
     commissionPerContainerAed: moneySchema,
+    commissionQuantity: z.number().nonnegative().nullable().optional(),
     agentCommissions: z.array(z.object({ agentName: z.string(), commissionPerContainerAed: moneySchema })).default([]),
   }).nullable(),
 });
@@ -558,6 +559,7 @@ export const invoiceSchema = z.object({
   plannedContainerType: z.string(),
   plannedContainerCount: z.number().int().positive(),
   containers: z.array(containerSchema),
+  linkedVendorTotalAed: moneySchema.nullable().optional(),
   lines: z.array(invoiceLineSchema),
   subtotal: moneySchema,
   vatAmount: moneySchema,
@@ -880,3 +882,5 @@ export function formatMoney(fils: bigint): string {
 export function normalizeServiceName(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("en");
 }
+
+export { invoiceProfitTotals } from "./service-profit.js";
